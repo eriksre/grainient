@@ -17,8 +17,20 @@ function cream(rand: Rand): string {
   return hslHex(range(rand, 38, 55), range(rand, 45, 75), range(rand, 84, 92))
 }
 
-const DARK_SCHEMES = ['analogous', 'complement', 'ember', 'noir', 'triad'] as const
-const LIGHT_SCHEMES = ['dawn', 'paper', 'sorbet', 'mist'] as const
+const DARK_SCHEMES = [
+  'analogous',
+  'complement',
+  'ember',
+  'noir',
+  'triad',
+  'jewel',
+  'neon',
+  'earth',
+  'midnight',
+  'duotone',
+  'wild',
+] as const
+const LIGHT_SCHEMES = ['dawn', 'paper', 'sorbet', 'mist', 'porcelain', 'meadow', 'candy', 'wild'] as const
 
 function hexToHsl(hex: string): [number, number, number] {
   const [r8, g8, b8] = hexToRgb(hex)
@@ -168,6 +180,115 @@ export function randomPalette(rand: Rand, mode: Mode = 'dark'): string[] {
         hslHex(hh - range(rand, 10, 30), range(rand, 30, 50), range(rand, 80, 90)),
         hslHex(hh + range(rand, -20, 20), range(rand, 55, 75), range(rand, 58, 68)),
       ]
+      break
+    }
+    case 'jewel':
+      // deep gem tones with a gold lift
+      colors = [
+        hslHex(h, range(rand, 65, 90), range(rand, 34, 46)),
+        hslHex(h + range(rand, 25, 45), range(rand, 60, 85), range(rand, 42, 54)),
+        hslHex(h + range(rand, 160, 200), range(rand, 55, 80), range(rand, 48, 58)),
+        nearBlack(rand, h),
+      ]
+      if (rand() < 0.45) colors.push(hslHex(range(rand, 40, 50), range(rand, 70, 90), range(rand, 60, 70)))
+      break
+    case 'neon':
+      // electric strokes on a heavy dark field
+      colors = [
+        hslHex(h, range(rand, 92, 100), range(rand, 55, 66)),
+        hslHex(h + range(rand, 25, 60), range(rand, 90, 100), range(rand, 58, 70)),
+        nearBlack(rand, h),
+        nearBlack(rand, h + 120),
+      ]
+      if (rand() < 0.4) colors.push(hslHex(h + range(rand, 150, 210), range(rand, 90, 100), range(rand, 60, 70)))
+      break
+    case 'earth': {
+      // muted clay, ochre, moss
+      const hh = range(rand, 18, 55)
+      colors = [
+        hslHex(hh, range(rand, 35, 55), range(rand, 30, 42)),
+        hslHex(hh + range(rand, 10, 30), range(rand, 40, 60), range(rand, 48, 60)),
+        hslHex(hh + range(rand, 40, 80), range(rand, 25, 45), range(rand, 38, 52)),
+        cream(rand),
+        nearBlack(rand, hh),
+      ]
+      break
+    }
+    case 'midnight': {
+      // blue/violet depths with one bright signal
+      const hh = range(rand, 205, 280)
+      colors = [
+        hslHex(hh, range(rand, 55, 85), range(rand, 20, 32)),
+        hslHex(hh + range(rand, -25, 25), range(rand, 60, 90), range(rand, 38, 50)),
+        hslHex(hh + range(rand, -15, 15), range(rand, 75, 95), range(rand, 60, 70)),
+        nearBlack(rand, hh),
+      ]
+      break
+    }
+    case 'duotone': {
+      // one hue, four depths
+      const s2 = range(rand, 55, 90)
+      colors = [
+        hslHex(h, s2, range(rand, 12, 20)),
+        hslHex(h + range(rand, -8, 8), s2 * 0.9, range(rand, 34, 44)),
+        hslHex(h + range(rand, -8, 8), s2, range(rand, 55, 65)),
+        hslHex(h + range(rand, -8, 8), s2 * 0.8, range(rand, 76, 86)),
+      ]
+      break
+    }
+    case 'porcelain':
+      // near-white field, one soft wash, one saturated accent
+      colors = [
+        hslHex(h, range(rand, 15, 30), range(rand, 90, 95)),
+        cream(rand),
+        hslHex(h + range(rand, -20, 20), range(rand, 35, 60), range(rand, 74, 84)),
+        hslHex(h + range(rand, -10, 30), range(rand, 70, 92), range(rand, 55, 65)),
+      ]
+      break
+    case 'meadow': {
+      // light greens into warm yellows
+      const hh = range(rand, 70, 150)
+      colors = [
+        hslHex(hh, range(rand, 45, 70), range(rand, 72, 84)),
+        hslHex(hh - range(rand, 25, 50), range(rand, 55, 80), range(rand, 70, 82)),
+        hslHex(hh + range(rand, 15, 40), range(rand, 35, 55), range(rand, 64, 76)),
+        cream(rand),
+      ]
+      break
+    }
+    case 'candy':
+      // bright saturated pastels
+      colors = [
+        hslHex(h, range(rand, 70, 90), range(rand, 72, 82)),
+        hslHex(h + range(rand, 30, 60), range(rand, 70, 90), range(rand, 70, 80)),
+        hslHex(h + range(rand, -60, -30), range(rand, 65, 85), range(rand, 74, 84)),
+        hslHex(h + range(rand, 0, 25), range(rand, 85, 98), range(rand, 60, 68)),
+      ]
+      break
+    case 'wild': {
+      // fully procedural: random harmony structure + mode-aware tone bands
+      const structure = pick(rand, [
+        [0, 25, 50],
+        [0, 180, 22],
+        [0, 150, -150],
+        [0, 32, -32],
+        [0, 55, 180],
+        [0, 0, 0], // mono
+      ])
+      const k = 3 + Math.floor(rand() * 3)
+      const isLight = mode === 'light' || (mode === 'mix' && rand() < 0.5)
+      colors = []
+      for (let i = 0; i < k; i++) {
+        const hue = h + structure[i % structure.length] + range(rand, -10, 10)
+        if (isLight) {
+          colors.push(hslHex(hue, range(rand, 35, 90), range(rand, 62, 88)))
+        } else {
+          colors.push(hslHex(hue, range(rand, 55, 98), range(rand, 28, 68)))
+        }
+      }
+      if (!isLight && rand() < 0.75) colors.push(nearBlack(rand, h))
+      if (isLight ? rand() < 0.6 : rand() < 0.3) colors.push(cream(rand))
+      colors = colors.slice(0, 6)
       break
     }
   }

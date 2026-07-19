@@ -648,7 +648,9 @@ export default function App() {
         <header className="head-row">
           <div>
             <h1>grainient</h1>
-            <p className="sub">grainy gradients on demand · ← back · → forward</p>
+            <p className="sub">
+              grainy gradients on demand<span className="kbd-hint"> · ← back · → forward</span>
+            </p>
           </div>
           <button
             className="theme-btn"

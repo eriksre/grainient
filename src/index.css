@@ -648,22 +648,30 @@ input[type='range']::-moz-range-thumb {
   border-top: 1px solid var(--line);
 }
 
-/* narrow screens: panel below stage */
+/* narrow screens: gradient stays pinned, controls scroll beneath it */
 @media (max-width: 760px) {
   .app {
     flex-direction: column;
-    height: auto;
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
   }
 
   .stage {
-    height: 58vh;
-    padding: 20px;
+    flex: none;
+    height: 42vh;
+    height: 42dvh;
+    padding: 18px;
   }
 
   .panel {
+    flex: 1;
+    min-height: 0;
     width: 100%;
     border-left: none;
     border-top: 1px solid var(--line);
+  }
+
+  .kbd-hint {
+    display: none;
   }
 }
