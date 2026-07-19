@@ -246,6 +246,7 @@ export default function App() {
   const [selIdx, setSelIdx] = useState(0)
   const [hexDraft, setHexDraft] = useState('')
   const [dlOpen, setDlOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     localStorage.getItem('grainient.theme') === 'light' ? 'light' : 'dark',
   )
@@ -632,6 +633,25 @@ export default function App() {
     return () => document.removeEventListener('mousedown', close)
   }, [dlOpen])
 
+  // copy the rendered gradient to the clipboard as a PNG
+  const copyImage = useCallback(async () => {
+    try {
+      const { settings, ratio, imageField } = stateRef.current
+      const [w, h] = dims(ratio, EXPORT_LONG)
+      const c = document.createElement('canvas')
+      renderGradient(c, settings, w, h, imageField)
+      // promise form so Safari accepts it too
+      const blob = new Promise<Blob>((resolve, reject) =>
+        c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'),
+      )
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1400)
+    } catch (err) {
+      console.error('copy failed', err)
+    }
+  }, [])
+
   // agent API part 1: URL params on load
   useEffect(() => {
     const q = new URLSearchParams(location.search)
@@ -693,6 +713,8 @@ export default function App() {
       export: (fmt: Format = 'png', long = EXPORT_LONG) => exportDataURL(fmt, long),
       /** trigger a browser file download */
       download: (fmt?: Format) => download(fmt),
+      /** copy the rendered PNG to the clipboard */
+      copy: copyImage,
       /** load an image URL/dataURL: sets palette + the 'image' shape style */
       fromImage: async (url: string, useShape = true) => {
         const { colors, field } = await importImageUrl(url)
@@ -706,7 +728,7 @@ export default function App() {
     return () => {
       delete (window as unknown as Record<string, unknown>).grainient
     }
-  }, [lucky, shuffle, back, forward, exportDataURL, download, pushHistory])
+  }, [lucky, shuffle, back, forward, exportDataURL, download, copyImage, pushHistory])
 
   const setColor = (i: number, v: string) =>
     setSettings((s) => {
@@ -773,7 +795,11 @@ export default function App() {
           <div>
             <h1>grainient</h1>
             <p className="sub">
-              grainy gradients on demand<span className="kbd-hint"> · ← back · → forward</span>
+              grainy gradients on demand
+              <span className="kbd-hint">
+                <br />
+                navigate using ← &amp; → arrows
+              </span>
             </p>
           </div>
           <button
@@ -829,6 +855,23 @@ export default function App() {
               </div>
             )}
           </div>
+          <button
+            className={`bookmark ${copied ? 'on' : ''}`}
+            onClick={copyImage}
+            title="copy image to clipboard"
+            aria-label="copy gradient image to clipboard"
+          >
+            {copied ? (
+              <svg viewBox="0 0 24 24" width="16" height="16">
+                <path d="M4.5 12.5l5 5 10-11" fill="none" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="16" height="16">
+                <rect x="9" y="9" width="11" height="11" rx="2" fill="none" />
+                <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" fill="none" />
+              </svg>
+            )}
+          </button>
           <button
             className={`bookmark ${isSaved ? 'on' : ''}`}
             onClick={toggleSave}

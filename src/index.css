@@ -135,9 +135,10 @@ body {
 }
 
 .panel h1 {
-  font-size: 21px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-family: 'Geist Pixel', 'Geist', ui-monospace, monospace;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
 }
 
 .sub {
