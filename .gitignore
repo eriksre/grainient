@@ -11,7 +11,14 @@ node_modules
 dist
 dist-ssr
 .wrangler
+coverage
+*.tsbuildinfo
 *.local
+
+# Local environment files (keep shareable templates)
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*

@@ -20,6 +20,65 @@ function cream(rand: Rand): string {
 const DARK_SCHEMES = ['analogous', 'complement', 'ember', 'noir', 'triad'] as const
 const LIGHT_SCHEMES = ['dawn', 'paper', 'sorbet', 'mist'] as const
 
+function hexToHsl(hex: string): [number, number, number] {
+  const [r8, g8, b8] = hexToRgb(hex)
+  const r = r8 / 255
+  const g = g8 / 255
+  const b = b8 / 255
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const l = (max + min) / 2
+  if (max === min) return [0, 0, l * 100]
+  const d = max - min
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+  let h: number
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6
+  else if (max === g) h = ((b - r) / d + 2) / 6
+  else h = ((r - g) / d + 4) / 6
+  return [h * 360, s * 100, l * 100]
+}
+
+// hue offsets from the dominant color that read as intentional rather than muddy:
+// same family, analogous, split-complement, complement — never the 90–140° clash zone
+const HARMONIC_ANCHORS = [0, 28, -28, 55, -55, 150, -150, 180]
+
+/**
+ * Gently pull each vivid color's hue toward the nearest harmonic anchor relative
+ * to the palette's dominant hue. Neutrals, near-blacks, and creams pass through.
+ * Only applied to palettes WE generate — user-picked colors are never touched.
+ */
+function harmonize(colors: string[]): string[] {
+  const hsl = colors.map(hexToHsl)
+  let domIdx = 0
+  let best = -1
+  hsl.forEach(([, s, l], i) => {
+    const score = s * (1 - Math.abs(l - 50) / 50)
+    if (score > best) {
+      best = score
+      domIdx = i
+    }
+  })
+  const dom = hsl[domIdx][0]
+  return colors.map((c, i) => {
+    const [h, s, l] = hsl[i]
+    if (i === domIdx || s < 25 || l < 12 || l > 92) return c
+    const rel = ((h - dom + 540) % 360) - 180
+    let anchor = HARMONIC_ANCHORS[0]
+    let min = Infinity
+    for (const a of HARMONIC_ANCHORS) {
+      const d = Math.abs(rel - a)
+      if (d < min) {
+        min = d
+        anchor = a
+      }
+    }
+    if (min < 10) return c
+    const target = dom + anchor
+    const nh = h + ((((target - h + 540) % 360) - 180) * 0.75)
+    return hslHex(nh, s, l)
+  })
+}
+
 export function randomPalette(rand: Rand, mode: Mode = 'dark'): string[] {
   const h = rand() * 360
   const scheme =
@@ -112,6 +171,8 @@ export function randomPalette(rand: Rand, mode: Mode = 'dark'): string[] {
       break
     }
   }
+
+  colors = harmonize(colors)
 
   // shuffle so the anchor lands in different spots for linear/waves styles
   for (let i = colors.length - 1; i > 0; i--) {

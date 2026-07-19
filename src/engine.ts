@@ -1,15 +1,30 @@
 // Gradient render engine: low-res color field → smooth upscale → film grain → ascii overlay.
 // Everything is deterministic per seed so preview and PNG export match exactly.
 
-export type Style = 'mesh' | 'waves' | 'beams' | 'spotlight' | 'linear' | 'radial' | 'image'
+export type Style =
+  | 'mesh'
+  | 'bloom'
+  | 'rise'
+  | 'set'
+  | 'waves'
+  | 'horizon'
+  | 'beams'
+  | 'spotlight'
+  | 'linear'
+  | 'radial'
+  | 'image'
 
 export type Mode = 'dark' | 'light' | 'mix'
+
+export type AsciiSet = 'classic' | 'code' | 'dots' | 'heavy'
 
 export interface AsciiSettings {
   enabled: boolean
   size: number // cell size in 1/1000ths of canvas width, so exports scale correctly
   opacity: number // 0..1
-  density: number // 0..1 fraction of cells that get a character
+  density: number // 0..1 how deep into the mid-tones glyphs reach
+  contrast?: number // 0..1 S-curve on the tonal drive; 0.2 ≈ neutral
+  set?: AsciiSet // glyph vocabulary
 }
 
 export interface Settings {
@@ -56,6 +71,13 @@ export function hslHex(h: number, s: number, l: number): string {
 function luminance(hex: string): number {
   const [r, g, b] = hexToRgb(hex)
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+function saturation(hex: string): number {
+  const [r, g, b] = hexToRgb(hex)
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  return max === 0 ? 0 : (max - min) / max
 }
 
 function shuffled<T>(arr: T[], rand: () => number): T[] {
@@ -148,37 +170,150 @@ function paintField(
       break
     }
     case 'waves': {
-      // stacked soft ridges, like layered hills
+      // stacked soft ridges, like layered hills — each band's fill fades into the next
       const order = shuffled(cols, rand)
       o.fillStyle = order[0]
       o.fillRect(0, 0, lw, lh)
       const rot = (rand() - 0.5) * 0.7
       const ext = maxDim
+      const n = order.length
+      const bands: { c: string; yBase: number; amp: number; freq: number; phase: number }[] = []
+      for (let i = 1; i < n; i++) {
+        bands.push({
+          c: order[i],
+          yBase: (i / n) * lh * 1.15 - lh * 0.05 + (rand() - 0.5) * lh * 0.18,
+          amp: (0.04 + rand() * 0.12) * lh,
+          freq: ((0.6 + rand() * 1.4) * Math.PI * 2) / lw,
+          phase: rand() * Math.PI * 2,
+        })
+      }
+      bands.sort((a, b) => a.yBase - b.yBase)
       o.save()
       o.translate(lw / 2, lh / 2)
       o.rotate(rot)
       o.translate(-lw / 2, -lh / 2)
-      const n = order.length
-      for (let i = 1; i < n; i++) {
-        const yBase = (i / n) * lh * 1.15 - lh * 0.05 + (rand() - 0.5) * lh * 0.18
-        const amp = (0.06 + rand() * 0.17) * lh
-        const freq = ((0.7 + rand() * 1.8) * Math.PI * 2) / lw
-        const phase = rand() * Math.PI * 2
+      for (let i = 0; i < bands.length; i++) {
+        const b = bands[i]
+        const nextY = i + 1 < bands.length ? bands[i + 1].yBase : lh + ext
+        const nextC = i + 1 < bands.length ? bands[i + 1].c : b.c
+        const g = o.createLinearGradient(0, b.yBase, 0, Math.max(b.yBase + 2, nextY))
+        g.addColorStop(0, b.c)
+        g.addColorStop(1, nextC)
         o.beginPath()
-        o.moveTo(-ext, yBase + Math.sin(-ext * freq + phase) * amp)
+        o.moveTo(-ext, b.yBase + Math.sin(-ext * b.freq + b.phase) * b.amp)
         for (let x = -ext; x <= lw + ext; x += 1) {
-          o.lineTo(x, yBase + Math.sin(x * freq + phase) * amp)
+          o.lineTo(x, b.yBase + Math.sin(x * b.freq + b.phase) * b.amp)
         }
         o.lineTo(lw + ext, lh + ext)
         o.lineTo(-ext, lh + ext)
         o.closePath()
-        o.fillStyle = order[i]
+        o.fillStyle = g
         o.fill()
       }
       o.restore()
-      // a soft glow where two bands meet
-      const accent = order[Math.floor(rand() * n)]
-      blob(accent, rand() * lw, rand() * lh, (0.3 + rand() * 0.3) * maxDim, 0.35)
+      break
+    }
+    case 'bloom': {
+      // composed corner glows over an anchor field
+      o.fillStyle = anchor(cols, s.mode, rand)
+      o.fillRect(0, 0, lw, lh)
+      const corners: [number, number][] = shuffled(
+        [
+          [0, 0],
+          [1, 0],
+          [0, 1],
+          [1, 1],
+        ],
+        rand,
+      )
+      const order = shuffled(cols, rand)
+      const count = Math.min(order.length, 2 + Math.floor(rand() * 2))
+      for (let i = 0; i < count; i++) {
+        const [cx, cy] = corners[i]
+        blob(
+          order[i],
+          (cx + (rand() - 0.5) * 0.3) * lw,
+          (cy + (rand() - 0.5) * 0.3) * lh,
+          (0.55 + rand() * 0.45) * maxDim,
+        )
+      }
+      if (rand() < 0.5) {
+        blob(order[count % order.length], (0.35 + rand() * 0.3) * lw, (0.35 + rand() * 0.3) * lh, 0.5 * maxDim, 0.35)
+      }
+      break
+    }
+    case 'rise':
+    case 'set': {
+      // a radial dome anchored to the bottom (rise) or top (set) edge —
+      // varied position, width, squash, and layered stops
+      const bgc = anchor(cols, s.mode, rand)
+      o.fillStyle = bgc
+      o.fillRect(0, 0, lw, lh)
+      const bgL = luminance(bgc)
+      const rest = cols.filter((c) => c !== bgc)
+      // core = strongest contrast against the field, melting outward toward it
+      rest.sort((a, b) => Math.abs(luminance(b) - bgL) - Math.abs(luminance(a) - bgL))
+      const ring = rest.length ? [...rest.slice(0, 3), bgc] : [bgc, bgc]
+      const isRise = style === 'rise'
+      const cx = (0.15 + rand() * 0.7) * lw
+      const edge = rand() * 0.18 // how far past the edge the center sits
+      const cy = isRise ? lh * (1 + edge) : -lh * edge
+      const squashX = 0.9 + rand() * 1.6
+      const squashY = 0.55 + rand() * 0.75
+      const R = maxDim * (0.55 + rand() * 0.6)
+      const paintDome = (x: number, y: number, sx: number, sy: number, r: number, alpha: number) => {
+        o.save()
+        o.translate(x, y)
+        o.scale(sx, sy)
+        const g = o.createRadialGradient(0, 0, 0, 0, 0, r)
+        ring.forEach((c, i) => {
+          const t = i / (ring.length - 1)
+          const jitter = i === 0 || i === ring.length - 1 ? 0 : (rand() - 0.5) * 0.14
+          const [cr, cg, cb] = hexToRgb(c)
+          g.addColorStop(Math.min(1, Math.max(0, t + jitter)), `rgba(${cr},${cg},${cb},${alpha})`)
+        })
+        o.fillStyle = g
+        const cover = r * 2
+        o.fillRect(-cover, -cover, cover * 2, cover * 2)
+        o.restore()
+      }
+      paintDome(cx, cy, squashX, squashY, R, 1)
+      // occasional second, smaller echo dome for asymmetry
+      if (rand() < 0.4 && rest.length > 1) {
+        const cx2 = (0.1 + rand() * 0.8) * lw
+        paintDome(cx2, cy, 0.5 + rand() * 0.8, squashY * (0.6 + rand() * 0.5), R * (0.4 + rand() * 0.3), 0.55)
+      }
+      break
+    }
+    case 'horizon': {
+      // soft strata with a squashed glow near the brightest edge
+      const byLum = [...cols].sort((a, b) => luminance(a) - luminance(b))
+      const brightBottom = rand() < 0.5
+      const order = brightBottom ? byLum : [...byLum].reverse()
+      const g = o.createLinearGradient(0, 0, 0, lh)
+      order.forEach((c, i) => {
+        const t = i / (order.length - 1 || 1)
+        const jitter = i === 0 || i === order.length - 1 ? 0 : (rand() - 0.5) * 0.15
+        g.addColorStop(Math.min(1, Math.max(0, t + jitter)), c)
+      })
+      o.fillStyle = g
+      o.fillRect(0, 0, lw, lh)
+      const bright = byLum[byLum.length - 1]
+      const [br, bg2, bb] = hexToRgb(bright)
+      const gy = brightBottom ? lh * (0.72 + rand() * 0.2) : lh * (0.08 + rand() * 0.2)
+      o.save()
+      o.translate((0.2 + rand() * 0.6) * lw, gy)
+      o.scale(1, 0.45 + rand() * 0.3)
+      const R = maxDim * (0.4 + rand() * 0.3)
+      const glow = o.createRadialGradient(0, 0, 0, 0, 0, R)
+      glow.addColorStop(
+        0,
+        `rgba(${Math.min(255, br + 60)},${Math.min(255, bg2 + 60)},${Math.min(255, bb + 60)},0.9)`,
+      )
+      glow.addColorStop(1, `rgba(${br},${bg2},${bb},0)`)
+      o.fillStyle = glow
+      o.fillRect(-R, -R, R * 2, R * 2)
+      o.restore()
       break
     }
     case 'beams': {
@@ -271,11 +406,30 @@ function paintField(
       break
     }
     case 'radial': {
+      // tasteful glow: monotonic luminance from a bright core out to the darkest rim,
+      // so clashing hues never form alternating rings
+      const byLum = [...cols].sort((a, b) => luminance(b) - luminance(a))
+      const avg = cols.reduce((t, c) => t + luminance(c), 0) / cols.length
+      const light = s.mode === 'light' || (s.mode === 'mix' && avg > 140)
+      let order: string[]
+      if (light) {
+        // light fields read best with a saturated core melting into paler tones
+        const core = [...cols].sort((a, b) => saturation(b) - saturation(a))[0]
+        order = [core, ...byLum.filter((c) => c !== core)]
+      } else {
+        order = byLum
+      }
+      if (order.length > 4) {
+        order = [order[0], order[1], order[order.length - 2], order[order.length - 1]]
+      }
       const fx = (0.2 + rand() * 0.6) * lw
       const fy = (0.2 + rand() * 0.6) * lh
-      const g = o.createRadialGradient(fx, fy, 0, fx, fy, maxDim * (0.8 + rand() * 0.4))
-      const order = shuffled(cols, rand)
-      order.forEach((c, i) => g.addColorStop(i / (order.length - 1 || 1), c))
+      const g = o.createRadialGradient(fx, fy, 0, fx, fy, maxDim * (0.85 + rand() * 0.4))
+      order.forEach((c, i) => {
+        const t = i / (order.length - 1 || 1)
+        const jitter = i === 0 || i === order.length - 1 ? 0 : (rand() - 0.5) * 0.12
+        g.addColorStop(Math.min(1, Math.max(0, t + jitter)), c)
+      })
       o.fillStyle = g
       o.fillRect(0, 0, lw, lh)
       break
@@ -283,7 +437,45 @@ function paintField(
   }
 }
 
-const RAMP = ' .:-=+xX8S#@'
+// Glyph vocabularies: each brightness class is a POOL of glyphs with similar ink
+// weight, so a tonal band reads as one texture but never repeats a single character.
+// Ordered weak → strong.
+const ASCII_SETS: Record<AsciiSet, string[][]> = {
+  classic: [['.'], [':'], ['-', '~'], ['=', '+'], ['x', '*'], ['X', 'S'], ['8', '0'], ['#', '&'], ['@']],
+  code: [
+    ['.', ','],
+    [':', ';', "'"],
+    ['!', 'i', '|', '('],
+    ['=', '?', '+', '{'],
+    ['x', 'c', 'v', 'z'],
+    ['X', 'V', 'U', '$'],
+    ['8', 'S', 'K', '0'],
+    ['#', 'W', '&'],
+    ['@'],
+  ],
+  dots: [['.'], ['.'], [':'], [':'], ['+'], ['o'], ['*'], ['O'], ['@']],
+  heavy: [['.'], [':'], ['='], ['x'], ['X'], ['8'], ['#'], ['M'], ['@']],
+}
+
+// deterministic per-cell hash so glyph choice is stable across re-renders and exports
+function cellHash(x: number, y: number, seed: number): number {
+  let n = (x * 73856093) ^ (y * 19349663) ^ (seed | 0)
+  n = Math.imul(n ^ (n >>> 13), 0x5bd1e995)
+  return (n ^ (n >>> 15)) >>> 0
+}
+
+// 8×8 Bayer matrix: ordered dithering makes glyph placement follow the image's
+// tonal structure instead of scattering randomly
+const BAYER8 = [
+  [0, 32, 8, 40, 2, 34, 10, 42],
+  [48, 16, 56, 24, 50, 18, 58, 26],
+  [12, 44, 4, 36, 14, 46, 6, 38],
+  [60, 28, 52, 20, 62, 30, 54, 22],
+  [3, 35, 11, 43, 1, 33, 9, 41],
+  [51, 19, 59, 27, 49, 17, 57, 25],
+  [15, 47, 7, 39, 13, 45, 5, 37],
+  [63, 31, 55, 23, 61, 29, 53, 21],
+]
 
 function drawAscii(ctx: CanvasRenderingContext2D, w: number, h: number, s: Settings) {
   const cell = Math.max(5, Math.round((s.ascii.size / 1000) * w))
@@ -295,7 +487,6 @@ function drawAscii(ctx: CanvasRenderingContext2D, w: number, h: number, s: Setti
   const t = tiny.getContext('2d')!
   t.drawImage(ctx.canvas, 0, 0, cols, rows)
   const data = t.getImageData(0, 0, cols, rows).data
-  const rand = mulberry32((s.seed ^ 0x9e3779b9) >>> 0)
 
   // On dark images glyphs live in the light sections (and are lightened);
   // on light images that flips: glyphs live in the dark sections and are darkened.
@@ -305,23 +496,29 @@ function drawAscii(ctx: CanvasRenderingContext2D, w: number, h: number, s: Setti
   }
   const lightBg = sum / (data.length / 4) > 128
 
+  const pools = ASCII_SETS[s.ascii.set ?? 'code'] ?? ASCII_SETS.code
+  // S-curve contrast on the tonal drive: higher values carve crisper bands
+  const k = 0.5 + (s.ascii.contrast ?? 0.2) * 2.5
+
   ctx.save()
   ctx.font = `${Math.round(cell * 0.95)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < cols; x++) {
-      const keep = rand() <= s.ascii.density
-      if (!keep) continue
       const i = (y * cols + x) * 4
       const r = data[i]
       const g = data[i + 1]
       const b = data[i + 2]
       const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
-      const drive = lightBg ? 1 - lum : lum
-      const idx = Math.min(RAMP.length - 1, Math.floor(drive * RAMP.length))
-      const ch = RAMP[idx]
-      if (ch === ' ') continue
+      let drive = lightBg ? 1 - lum : lum
+      drive = Math.min(1, Math.max(0, 0.5 + (drive - 0.5) * k))
+      // ordered dither: strong tones always earn a glyph, mid tones form
+      // structured contour bands, weak tones stay clean
+      const threshold = BAYER8[y % 8][x % 8] / 64
+      if (drive * (0.25 + s.ascii.density * 0.95) <= threshold) continue
+      const pool = pools[Math.min(pools.length - 1, Math.floor(drive * pools.length))]
+      const ch = pool[cellHash(x, y, s.seed) % pool.length]
       let cr: number, cg: number, cb: number
       if (lightBg) {
         cr = r * 0.4
@@ -332,7 +529,9 @@ function drawAscii(ctx: CanvasRenderingContext2D, w: number, h: number, s: Setti
         cg = g + (255 - g) * 0.6
         cb = b + (255 - b) * 0.6
       }
-      ctx.fillStyle = `rgba(${cr | 0},${cg | 0},${cb | 0},${s.ascii.opacity})`
+      // stronger tones print with more ink — adds depth inside a band
+      const alpha = s.ascii.opacity * (0.45 + 0.55 * drive)
+      ctx.fillStyle = `rgba(${cr | 0},${cg | 0},${cb | 0},${alpha})`
       ctx.fillText(ch, x * cell + cell / 2, y * cell + cell / 2)
     }
   }

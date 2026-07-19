@@ -166,6 +166,15 @@ button {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.ghost:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.ghost:disabled:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .ghost.wide {
   width: 100%;
 }
@@ -308,6 +317,223 @@ input[type='range']::-moz-range-thumb {
   cursor: pointer;
 }
 
+/* compact action row */
+.row .ghost {
+  padding: 6px 10px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+/* bookmark save */
+.bookmark {
+  flex-shrink: 0;
+  width: 32px;
+  align-self: stretch;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.bookmark svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.bookmark:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.bookmark.on {
+  color: #fff;
+}
+
+.bookmark.on svg {
+  fill: currentColor;
+}
+
+.bm-mini {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+
+/* download format menu */
+.dl-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+}
+
+.dl-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 110px;
+  background: #17171d;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.dl-menu button {
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.dl-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* accordion sections */
+.acc {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.acc summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: none;
+}
+
+.acc summary::-webkit-details-marker {
+  display: none;
+}
+
+.acc summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.acc[open] summary::before {
+  transform: rotate(45deg);
+}
+
+.acc summary:hover {
+  color: #c9c9d3;
+}
+
+.acc summary .hint {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: #9c9ca8;
+}
+
+.acc-body {
+  padding: 2px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* hex input */
+.hex {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+}
+
+.hex:focus {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.swatch.sel {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 1px;
+}
+
+/* library */
+.lib-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.lib-item {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  aspect-ratio: 4 / 3;
+}
+
+.lib-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.lib-item img:hover {
+  transform: scale(1.06);
+}
+
+.lib-item .x {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  font-size: 12px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border-bottom-left-radius: 8px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.lib-item:hover .x {
+  opacity: 1;
+}
+
+.toggle-label {
+  font-size: 12.5px;
+  color: #b9b9c4;
+}
+
 /* ascii toggle */
 .toggle-row {
   display: flex;
@@ -341,6 +567,12 @@ input[type='range']::-moz-range-thumb {
 
 .toggle.on span {
   transform: translateX(16px);
+}
+
+.toggle.in-summary {
+  margin-left: auto;
+  display: inline-block;
+  cursor: pointer;
 }
 
 .panel footer {
