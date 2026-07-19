@@ -255,33 +255,35 @@ function paintField(
       rest.sort((a, b) => Math.abs(luminance(b) - bgL) - Math.abs(luminance(a) - bgL))
       const ring = rest.length ? [...rest.slice(0, 3), bgc] : [bgc, bgc]
       const isRise = style === 'rise'
-      const cx = (0.15 + rand() * 0.7) * lw
+      const cx = lw / 2 // always centered — variety comes from shape, size, and squash
       const edge = rand() * 0.18 // how far past the edge the center sits
       const cy = isRise ? lh * (1 + edge) : -lh * edge
       const squashX = 0.9 + rand() * 1.6
-      const squashY = 0.55 + rand() * 0.75
+      const squashY = 0.5 + rand() * 0.75
       const R = maxDim * (0.55 + rand() * 0.6)
-      const paintDome = (x: number, y: number, sx: number, sy: number, r: number, alpha: number) => {
+      // the outermost stop fades to transparent so the dome melts into the field
+      // with no rectangular seams from the fill area's edges
+      const paintDome = (y: number, sx: number, sy: number, r: number, alpha: number) => {
         o.save()
-        o.translate(x, y)
+        o.translate(cx, y)
         o.scale(sx, sy)
         const g = o.createRadialGradient(0, 0, 0, 0, 0, r)
         ring.forEach((c, i) => {
+          const last = i === ring.length - 1
           const t = i / (ring.length - 1)
-          const jitter = i === 0 || i === ring.length - 1 ? 0 : (rand() - 0.5) * 0.14
+          const jitter = i === 0 || last ? 0 : (rand() - 0.5) * 0.08
           const [cr, cg, cb] = hexToRgb(c)
-          g.addColorStop(Math.min(1, Math.max(0, t + jitter)), `rgba(${cr},${cg},${cb},${alpha})`)
+          g.addColorStop(Math.min(1, Math.max(0, t + jitter)), `rgba(${cr},${cg},${cb},${last ? 0 : alpha})`)
         })
         o.fillStyle = g
-        const cover = r * 2
+        const cover = r * 1.1
         o.fillRect(-cover, -cover, cover * 2, cover * 2)
         o.restore()
       }
-      paintDome(cx, cy, squashX, squashY, R, 1)
-      // occasional second, smaller echo dome for asymmetry
+      paintDome(cy, squashX, squashY, R, 1)
+      // occasional inner halo for extra depth, concentric with the main dome
       if (rand() < 0.4 && rest.length > 1) {
-        const cx2 = (0.1 + rand() * 0.8) * lw
-        paintDome(cx2, cy, 0.5 + rand() * 0.8, squashY * (0.6 + rand() * 0.5), R * (0.4 + rand() * 0.3), 0.55)
+        paintDome(cy, squashX * (0.55 + rand() * 0.4), squashY * (0.6 + rand() * 0.5), R * (0.4 + rand() * 0.3), 0.55)
       }
       break
     }

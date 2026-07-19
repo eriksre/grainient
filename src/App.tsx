@@ -165,6 +165,26 @@ function readLibrary(): LibItem[] {
   }
 }
 
+/** canonical identity of a gradient — used to prevent duplicate saves */
+function gradKey(s: Settings, ratio: number): string {
+  return JSON.stringify([
+    s.seed,
+    s.style,
+    s.mode,
+    s.colors,
+    s.grain,
+    s.softness,
+    s.vignette,
+    s.ascii.enabled,
+    s.ascii.size,
+    s.ascii.opacity,
+    s.ascii.density,
+    s.ascii.contrast ?? 0.3,
+    s.ascii.set ?? 'code',
+    Math.round(ratio * 1000),
+  ])
+}
+
 function normalizeHex(v: string): string | null {
   let t = v.trim()
   if (!t.startsWith('#')) t = '#' + t
@@ -185,7 +205,9 @@ export default function App() {
   const [selIdx, setSelIdx] = useState(0)
   const [hexDraft, setHexDraft] = useState('')
   const [dlOpen, setDlOpen] = useState(false)
-  const [savedFlash, setSavedFlash] = useState(false)
+  const [theme, setTheme] = useState<'dark' | 'light'>(() =>
+    localStorage.getItem('grainient.theme') === 'light' ? 'light' : 'dark',
+  )
   const dlRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
@@ -199,20 +221,35 @@ export default function App() {
   })
 
   const historyRef = useRef<Snapshot[]>([])
+  const futureRef = useRef<Snapshot[]>([])
+  const snap = useCallback(
+    (): Snapshot => ({
+      settings: JSON.parse(JSON.stringify(stateRef.current.settings)),
+      ratio: stateRef.current.ratio,
+    }),
+    [],
+  )
+
+  // called before every divergent action — a new branch invalidates the redo queue
   const pushHistory = useCallback(() => {
-    const { settings, ratio } = stateRef.current
-    historyRef.current.push({ settings: JSON.parse(JSON.stringify(settings)), ratio })
+    historyRef.current.push(snap())
     if (historyRef.current.length > 100) historyRef.current.shift()
+    futureRef.current = []
     setHistLen(historyRef.current.length)
+  }, [snap])
+
+  const applySnap = useCallback((s: Snapshot) => {
+    setSettings(s.settings)
+    setRatio(s.ratio)
   }, [])
 
   const back = useCallback(() => {
     const prev = historyRef.current.pop()
     if (!prev) return
+    futureRef.current.push(snap())
     setHistLen(historyRef.current.length)
-    setSettings(prev.settings)
-    setRatio(prev.ratio)
-  }, [])
+    applySnap(prev)
+  }, [snap, applySnap])
 
   const patch = (p: Partial<Settings>) => setSettings((s) => ({ ...s, ...p }))
   const patchAscii = (p: Partial<Settings['ascii']>) =>
@@ -223,6 +260,19 @@ export default function App() {
     const seed = newSeed()
     setSettings((s) => ({ ...s, seed, colors: randomPalette(mulberry32(seed), s.mode) }))
   }, [pushHistory])
+
+  // → replays gradients you backed out of; only rolls a fresh lucky once the
+  // redo queue is exhausted
+  const forward = useCallback(() => {
+    const next = futureRef.current.pop()
+    if (next) {
+      historyRef.current.push(snap())
+      setHistLen(historyRef.current.length)
+      applySnap(next)
+    } else {
+      lucky()
+    }
+  }, [snap, applySnap, lucky])
 
   const shuffle = useCallback(() => {
     pushHistory()
@@ -276,7 +326,7 @@ export default function App() {
     renderGradient(c, settings, w, h, imageField)
   }, [settings, ratio, imageField])
 
-  // space = lucky, backspace = back
+  // space / → = lucky (→ replays the redo queue first), ⌫ / ← = back
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
@@ -284,14 +334,17 @@ export default function App() {
       if (e.code === 'Space') {
         e.preventDefault()
         lucky()
-      } else if (e.code === 'Backspace') {
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault()
+        forward()
+      } else if (e.code === 'Backspace' || e.code === 'ArrowLeft') {
         e.preventDefault()
         back()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [lucky, back])
+  }, [lucky, back, forward])
 
   const onFiles = useCallback(
     async (files: FileList | null) => {
@@ -358,7 +411,9 @@ export default function App() {
       const url = exportDataURL(f)
       const a = document.createElement('a')
       a.href = url
-      a.download = `grainient-${stateRef.current.settings.seed}.${f}`
+      const r = stateRef.current.ratio
+      const rName = (RATIOS.find(([, rr]) => Math.abs(r - rr) < 0.001)?.[0] ?? r.toFixed(2)).replace(':', 'x')
+      a.download = `grainient-${stateRef.current.settings.seed}-${rName}.${f}`
       a.click()
     },
     [exportDataURL],
@@ -418,11 +473,21 @@ export default function App() {
     [persistLib],
   )
 
-  const saveNow = useCallback(() => {
-    saveToLibrary()
-    setSavedFlash(true)
-    setTimeout(() => setSavedFlash(false), 1000)
-  }, [saveToLibrary])
+  // bookmark is a saved-state toggle: identical gradients can't be saved twice,
+  // clicking while saved removes it
+  const isSaved = library.some((it) => gradKey(it.settings, it.ratio) === gradKey(settings, ratio))
+  const toggleSave = useCallback(() => {
+    const key = gradKey(stateRef.current.settings, stateRef.current.ratio)
+    const existing = library.find((it) => gradKey(it.settings, it.ratio) === key)
+    if (existing) deleteFromLibrary(existing.id)
+    else saveToLibrary()
+  }, [library, deleteFromLibrary, saveToLibrary])
+
+  // site theme
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('grainient.theme', theme)
+  }, [theme])
 
   // close the download format menu on outside click
   useEffect(() => {
@@ -518,6 +583,7 @@ export default function App() {
       lucky,
       shuffle,
       back,
+      forward,
       /** render at export size, returns a data URL. fmt: png|jpg|webp */
       export: (fmt: Format = 'png', long = EXPORT_LONG) => exportDataURL(fmt, long),
       /** trigger a browser file download */
@@ -535,7 +601,7 @@ export default function App() {
     return () => {
       delete (window as unknown as Record<string, unknown>).grainient
     }
-  }, [lucky, shuffle, back, exportDataURL, download, pushHistory])
+  }, [lucky, shuffle, back, forward, exportDataURL, download, pushHistory])
 
   const setColor = (i: number, v: string) =>
     setSettings((s) => {
@@ -579,9 +645,28 @@ export default function App() {
       </main>
 
       <aside className="panel">
-        <header>
-          <h1>grainient</h1>
-          <p className="sub">grainy gradients on demand · space = lucky · ⌫ = back</p>
+        <header className="head-row">
+          <div>
+            <h1>grainient</h1>
+            <p className="sub">grainy gradients on demand · ← back · → forward</p>
+          </div>
+          <button
+            className="theme-btn"
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            title={theme === 'dark' ? 'switch to light mode' : 'switch to dark mode'}
+            aria-label="toggle color theme"
+          >
+            {theme === 'dark' ? (
+              <svg viewBox="0 0 24 24" width="16" height="16">
+                <circle cx="12" cy="12" r="4.5" />
+                <path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="16" height="16">
+                <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z" />
+              </svg>
+            )}
+          </button>
         </header>
 
         <button
@@ -619,10 +704,11 @@ export default function App() {
             )}
           </div>
           <button
-            className={`bookmark ${savedFlash ? 'on' : ''}`}
-            onClick={saveNow}
-            title="save to library"
-            aria-label="save current gradient"
+            className={`bookmark ${isSaved ? 'on' : ''}`}
+            onClick={toggleSave}
+            title={isSaved ? 'saved — click to remove' : 'save to library'}
+            aria-label={isSaved ? 'remove from saved' : 'save current gradient'}
+            aria-pressed={isSaved}
           >
             <svg viewBox="0 0 24 24" width="16" height="16">
               <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.7L5 21V4a1 1 0 0 1 1-1z" />

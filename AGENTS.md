@@ -42,7 +42,8 @@ grainient.get()                      // → current settings {seed, style, mode,
 grainient.set({ style: 'waves', colors: ['#ff6a00', '#1a1a40'], grain: 0.7, ratio: '4:5' })
 grainient.lucky()                    // new palette + layout (respects current mode)
 grainient.shuffle()                  // new layout, same palette
-grainient.back()                     // undo — restore the previous gradient
+grainient.back()                     // undo — restore the previous gradient (← / ⌫ in the UI)
+grainient.forward()                  // redo — replay undone gradients; new lucky when the queue is empty (→)
 grainient.export('webp')             // → data URL string at 2880px long edge (sync)
 grainient.export('jpg', 1200)        // custom size
 grainient.download('png')            // trigger a real file download
