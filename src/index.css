@@ -1,0 +1,370 @@
+:root {
+  color-scheme: dark;
+  --bg: #0a0a0d;
+  --panel: #0e0e13;
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #e9e9ee;
+  --muted: #7c7c88;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: flex;
+  height: 100vh;
+}
+
+/* stage */
+.stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 44px;
+  position: relative;
+}
+
+.stage canvas {
+  border-radius: 14px;
+  box-shadow: 0 32px 90px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 18px;
+  border: 2px dashed rgba(255, 255, 255, 0.4);
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 8, 12, 0.65);
+  backdrop-filter: blur(5px);
+  font-size: 15px;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* panel */
+.panel {
+  width: 324px;
+  flex-shrink: 0;
+  padding: 26px 22px;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.panel h1 {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.sub {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.panel section {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.panel label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* buttons */
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+.lucky {
+  position: relative;
+  flex-shrink: 0;
+  height: 52px;
+  min-height: 52px;
+  border-radius: 13px;
+  font-size: 15px;
+  font-weight: 650;
+  color: #fff;
+  overflow: hidden;
+  transition: transform 0.06s ease;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.lucky span {
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.55);
+}
+
+.lucky::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.lucky:hover::after {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.lucky:active {
+  transform: scale(0.975);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+}
+
+.ghost {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-size: 13px;
+  transition: background 0.12s ease;
+}
+
+.ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ghost.wide {
+  width: 100%;
+}
+
+/* chips */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: #cfcfd8;
+  font-size: 12.5px;
+  transition: all 0.12s ease;
+}
+
+.chip:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.chip.active {
+  background: #fff;
+  color: #0a0a0d;
+  border-color: #fff;
+  font-weight: 600;
+}
+
+/* swatches */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.swatch input[type='color'] {
+  position: absolute;
+  inset: -8px;
+  width: 52px;
+  height: 52px;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.swatch .x {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 15px;
+  height: 15px;
+  line-height: 13px;
+  font-size: 12px;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  border-bottom-left-radius: 8px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.swatch:hover .x {
+  opacity: 1;
+}
+
+.swatch.add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--muted);
+  border-style: dashed;
+  background: transparent;
+}
+
+.swatch.add:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+/* sliders */
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.slider-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: #b9b9c4;
+}
+
+.slider-val {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+/* ascii toggle */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toggle {
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.toggle span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.toggle.on {
+  background: #5b8cff;
+}
+
+.toggle.on span {
+  transform: translateX(16px);
+}
+
+.panel footer {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* narrow screens: panel below stage */
+@media (max-width: 760px) {
+  .app {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .stage {
+    height: 58vh;
+    padding: 20px;
+  }
+
+  .panel {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+}
