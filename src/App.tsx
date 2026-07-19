@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { mulberry32, renderGradient, type AsciiSet, type Mode, type Settings, type Style } from './engine'
+import {
+  DEFAULT_VIEW,
+  mulberry32,
+  renderGradient,
+  VIEW_MAX_SCALE,
+  VIEW_MIN_SCALE,
+  type AsciiSet,
+  type GrainType,
+  type Mode,
+  type Settings,
+  type Style,
+  type ViewTransform,
+} from './engine'
 import { importImage, importImageUrl, randomPalette } from './palette'
 
 const RATIOS: [string, number][] = [
@@ -14,6 +26,7 @@ const RATIOS: [string, number][] = [
 const STYLES: Style[] = ['mesh', 'bloom', 'rise', 'set', 'waves', 'horizon', 'beams', 'spotlight', 'linear', 'radial']
 const MODES: Mode[] = ['dark', 'light', 'mix']
 const ASCII_SETS_UI: AsciiSet[] = ['classic', 'code', 'dots', 'heavy']
+const GRAIN_TYPES: GrainType[] = ['film', 'coarse', 'pixel', 'dither']
 
 export type Format = 'png' | 'jpg' | 'webp'
 const FORMATS: Format[] = ['png', 'jpg', 'webp']
@@ -32,6 +45,7 @@ function makeInitial(): Settings {
     mode: 'mix',
     colors: randomPalette(mulberry32(seed), 'mix'),
     grain: 0.49,
+    grainType: 'film',
     softness: 0.45,
     vignette: 0.12,
     ascii: { enabled: true, size: 11, opacity: 0.67, density: 0.51, contrast: 0.3, set: 'code' },
@@ -72,6 +86,11 @@ function settingsFromParams(q: URLSearchParams, base: Settings): Settings | null
     s.colors = randomPalette(mulberry32(s.seed), s.mode)
   }
   num('grain', (v) => (s.grain = Math.min(1, Math.max(0, v))))
+  const gtype = q.get('grainType')
+  if (gtype && (GRAIN_TYPES as string[]).includes(gtype)) {
+    s.grainType = gtype as GrainType
+    touched = true
+  }
   num('softness', (v) => (s.softness = Math.min(1, Math.max(0, v))))
   num('vignette', (v) => (s.vignette = Math.min(1, Math.max(0, v))))
   num('asciiSize', (v) => (s.ascii.size = Math.min(32, Math.max(7, v))))
@@ -173,6 +192,7 @@ function gradKey(s: Settings, ratio: number): string {
     s.mode,
     s.colors,
     s.grain,
+    s.grainType ?? 'film',
     s.softness,
     s.vignette,
     s.ascii.enabled,
@@ -182,7 +202,28 @@ function gradKey(s: Settings, ratio: number): string {
     s.ascii.contrast ?? 0.3,
     s.ascii.set ?? 'code',
     Math.round(ratio * 1000),
+    Math.round((s.view?.x ?? 0.5) * 1000),
+    Math.round((s.view?.y ?? 0.5) * 1000),
+    Math.round((s.view?.s ?? 1) * 1000),
   ])
+}
+
+function clampView(v: ViewTransform): ViewTransform {
+  return {
+    x: Math.min(1.3, Math.max(-0.3, v.x)),
+    y: Math.min(1.3, Math.max(-0.3, v.y)),
+    s: Math.min(VIEW_MAX_SCALE, Math.max(VIEW_MIN_SCALE, v.s)),
+  }
+}
+
+/** zoom about a point u (0..1 frame coords) keeping it visually fixed */
+function zoomAt(v: ViewTransform, ux: number, uy: number, factor: number): ViewTransform {
+  const s2 = Math.min(VIEW_MAX_SCALE, Math.max(VIEW_MIN_SCALE, v.s * factor))
+  return {
+    x: v.x + (ux - 0.5) * (1 / v.s - 1 / s2),
+    y: v.y + (uy - 0.5) * (1 / v.s - 1 / s2),
+    s: s2,
+  }
 }
 
 function normalizeHex(v: string): string | null {
@@ -210,6 +251,11 @@ export default function App() {
   )
   const dlRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [panning, setPanning] = useState(false)
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>())
+  const pinchDistRef = useRef(0)
+  const viewRafRef = useRef(0)
+  const pendingViewRef = useRef<ViewTransform | null>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [fit, setFit] = useState({ w: 800, h: 450 })
@@ -255,10 +301,95 @@ export default function App() {
   const patchAscii = (p: Partial<Settings['ascii']>) =>
     setSettings((s) => ({ ...s, ascii: { ...s.ascii, ...p } }))
 
+  // --- canvas pan/zoom: rAF-throttled so drags render once per frame ---
+  const scheduleView = useCallback((mutate: (v: ViewTransform) => ViewTransform) => {
+    const base = pendingViewRef.current ?? { ...(stateRef.current.settings.view ?? DEFAULT_VIEW) }
+    pendingViewRef.current = clampView(mutate(base))
+    if (!viewRafRef.current) {
+      viewRafRef.current = requestAnimationFrame(() => {
+        viewRafRef.current = 0
+        const v = pendingViewRef.current
+        pendingViewRef.current = null
+        if (v) setSettings((s) => ({ ...s, view: v }))
+      })
+    }
+  }, [])
+
+  const resetView = useCallback(() => {
+    pendingViewRef.current = null
+    setSettings((s) => ({ ...s, view: undefined }))
+  }, [])
+
+  const onCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pointersRef.current.size === 2) {
+      const [a, b] = [...pointersRef.current.values()]
+      pinchDistRef.current = Math.hypot(a.x - b.x, a.y - b.y)
+    }
+    setPanning(true)
+  }
+
+  const onCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const p = pointersRef.current.get(e.pointerId)
+    if (!p) return
+    const dx = e.clientX - p.x
+    const dy = e.clientY - p.y
+    p.x = e.clientX
+    p.y = e.clientY
+    const rect = e.currentTarget.getBoundingClientRect()
+    const pts = [...pointersRef.current.values()]
+    if (pts.length === 1) {
+      // one finger / mouse drag: the content follows the pointer
+      scheduleView((v) => ({ ...v, x: v.x - dx / rect.width / v.s, y: v.y - dy / rect.height / v.s }))
+    } else if (pts.length === 2) {
+      // pinch: zoom about the midpoint, pan with it
+      const [a, b] = pts
+      const dist = Math.hypot(a.x - b.x, a.y - b.y)
+      const ratio = pinchDistRef.current > 0 ? dist / pinchDistRef.current : 1
+      pinchDistRef.current = dist
+      const ux = ((a.x + b.x) / 2 - rect.left) / rect.width
+      const uy = ((a.y + b.y) / 2 - rect.top) / rect.height
+      scheduleView((v) => {
+        const panned = { ...v, x: v.x - dx / 2 / rect.width / v.s, y: v.y - dy / 2 / rect.height / v.s }
+        return zoomAt(panned, ux, uy, ratio)
+      })
+    }
+  }
+
+  const onCanvasPointerEnd = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    pointersRef.current.delete(e.pointerId)
+    if (pointersRef.current.size < 2) pinchDistRef.current = 0
+    if (pointersRef.current.size === 0) setPanning(false)
+  }
+
+  // trackpad/wheel: scroll pans, pinch or ⌘/ctrl-scroll zooms at the cursor
+  useEffect(() => {
+    const c = canvasRef.current
+    if (!c) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = c.getBoundingClientRect()
+      if (e.ctrlKey || e.metaKey) {
+        const ux = (e.clientX - rect.left) / rect.width
+        const uy = (e.clientY - rect.top) / rect.height
+        scheduleView((v) => zoomAt(v, ux, uy, Math.exp(-e.deltaY * 0.01)))
+      } else {
+        scheduleView((v) => ({
+          ...v,
+          x: v.x + e.deltaX / rect.width / v.s,
+          y: v.y + e.deltaY / rect.height / v.s,
+        }))
+      }
+    }
+    c.addEventListener('wheel', onWheel, { passive: false })
+    return () => c.removeEventListener('wheel', onWheel)
+  }, [scheduleView])
+
   const lucky = useCallback(() => {
     pushHistory()
     const seed = newSeed()
-    setSettings((s) => ({ ...s, seed, colors: randomPalette(mulberry32(seed), s.mode) }))
+    setSettings((s) => ({ ...s, seed, colors: randomPalette(mulberry32(seed), s.mode), view: undefined }))
   }, [pushHistory])
 
   // → replays gradients you backed out of; only rolls a fresh lucky once the
@@ -276,7 +407,7 @@ export default function App() {
 
   const shuffle = useCallback(() => {
     pushHistory()
-    setSettings((s) => ({ ...s, seed: newSeed() }))
+    setSettings((s) => ({ ...s, seed: newSeed(), view: undefined }))
   }, [pushHistory])
 
   const setStyle = useCallback(
@@ -326,11 +457,13 @@ export default function App() {
     renderGradient(c, settings, w, h, imageField)
   }, [settings, ratio, imageField])
 
-  // space / → = lucky (→ replays the redo queue first), ⌫ / ← = back
+  // space / → = lucky (→ replays the redo queue first), ⌫ / ← = back.
+  // Buttons keep focus after a click, so shortcuts must still fire when a button
+  // is focused — only text entry and sliders keep their native key handling.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement
-      if (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'TEXTAREA') return
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
       if (e.code === 'Space') {
         e.preventDefault()
         lucky()
@@ -499,34 +632,6 @@ export default function App() {
     return () => document.removeEventListener('mousedown', close)
   }, [dlOpen])
 
-  // favicon: rendered by the engine itself
-  useEffect(() => {
-    const c = document.createElement('canvas')
-    renderGradient(
-      c,
-      {
-        seed: 777,
-        style: 'mesh',
-        mode: 'dark',
-        colors: ['#7c4dd4', '#ff6a3d', '#f5c26b', '#12101c'],
-        grain: 0.5,
-        softness: 0.6,
-        vignette: 0,
-        ascii: { enabled: false, size: 14, opacity: 0, density: 0 },
-      },
-      64,
-      64,
-    )
-    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-    if (!link) {
-      link = document.createElement('link')
-      link.rel = 'icon'
-      document.head.appendChild(link)
-    }
-    link.type = 'image/png'
-    link.href = c.toDataURL('image/png')
-  }, [])
-
   // agent API part 1: URL params on load
   useEffect(() => {
     const q = new URLSearchParams(location.search)
@@ -573,7 +678,7 @@ export default function App() {
         }
         setSettings((s) => {
           const next = { ...s }
-          for (const k of ['seed', 'style', 'mode', 'colors', 'grain', 'softness', 'vignette'] as const) {
+          for (const k of ['seed', 'style', 'mode', 'colors', 'grain', 'grainType', 'softness', 'vignette', 'view'] as const) {
             if (p[k] !== undefined) (next as unknown as Record<string, unknown>)[k] = p[k]
           }
           if (p.ascii && typeof p.ascii === 'object') next.ascii = { ...s.ascii, ...(p.ascii as object) }
@@ -637,10 +742,29 @@ export default function App() {
 
   const ratioName = RATIOS.find(([, r]) => Math.abs(ratio - r) < 0.001)?.[0] ?? 'custom'
 
+  const v = settings.view
+  const viewChanged =
+    !!v && (Math.abs(v.x - 0.5) > 0.002 || Math.abs(v.y - 0.5) > 0.002 || Math.abs(v.s - 1) > 0.002)
+
   return (
     <div className="app">
       <main className="stage" ref={stageRef}>
-        <canvas ref={canvasRef} style={{ width: fit.w, height: fit.h }} />
+        <canvas
+          ref={canvasRef}
+          className={panning ? 'panning' : ''}
+          style={{ width: fit.w, height: fit.h }}
+          onPointerDown={onCanvasPointerDown}
+          onPointerMove={onCanvasPointerMove}
+          onPointerUp={onCanvasPointerEnd}
+          onPointerCancel={onCanvasPointerEnd}
+          onDoubleClick={resetView}
+          title="drag to pan · pinch or ⌘-scroll to zoom · double-click to reset"
+        />
+        {viewChanged && (
+          <button className="reset-view" onClick={resetView}>
+            reset view
+          </button>
+        )}
         {dragging && <div className="drop-overlay">drop an image — palette + gradient shape</div>}
       </main>
 
@@ -819,8 +943,21 @@ export default function App() {
         </details>
 
         <details className="acc">
-          <summary>texture</summary>
+          <summary>
+            texture<span className="hint">{settings.grainType ?? 'film'}</span>
+          </summary>
           <div className="acc-body">
+            <div className="chips">
+              {GRAIN_TYPES.map((gt) => (
+                <button
+                  key={gt}
+                  className={`chip ${(settings.grainType ?? 'film') === gt ? 'active' : ''}`}
+                  onClick={() => patch({ grainType: gt })}
+                >
+                  {gt}
+                </button>
+              ))}
+            </div>
             <Slider label="grain" value={settings.grain} onChange={(v) => patch({ grain: v })} />
             <Slider label="softness" value={settings.softness} onChange={(v) => patch({ softness: v })} />
             <Slider label="vignette" value={settings.vignette} onChange={(v) => patch({ vignette: v })} />

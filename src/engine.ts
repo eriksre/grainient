@@ -16,6 +16,23 @@ export type Style =
 
 export type Mode = 'dark' | 'light' | 'mix'
 
+export type GrainType = 'film' | 'coarse' | 'pixel' | 'dither'
+
+/** camera over the color field: x/y = center in frame units (0.5 = default), s = zoom */
+export interface ViewTransform {
+  x: number
+  y: number
+  s: number
+}
+
+export const DEFAULT_VIEW: ViewTransform = { x: 0.5, y: 0.5, s: 1 }
+
+/** how far beyond the frame the field is painted, as a fraction of frame size */
+export const OVERSCAN = 0.5
+
+export const VIEW_MIN_SCALE = 1 / (1 + 2 * OVERSCAN)
+export const VIEW_MAX_SCALE = 4
+
 export type AsciiSet = 'classic' | 'code' | 'dots' | 'heavy'
 
 export interface AsciiSettings {
@@ -33,8 +50,10 @@ export interface Settings {
   mode: Mode
   colors: string[]
   grain: number // 0..1
+  grainType?: GrainType // texture character; defaults to 'film'
   softness: number // 0..1
   vignette: number // 0..1
+  view?: ViewTransform // pan/zoom camera; defaults to DEFAULT_VIEW
   ascii: AsciiSettings
 }
 
@@ -130,13 +149,18 @@ function paintField(
   const cols = s.colors.length ? s.colors : ['#1a1a2e', '#7b6cff']
   const maxDim = Math.max(lw, lh)
 
+  // the field is painted with overscan margins so the camera can pan/zoom
+  const ox = lw * OVERSCAN
+  const oy = lh * OVERSCAN
+  const fillAll = () => o.fillRect(-ox - 2, -oy - 2, lw + ox * 2 + 4, lh + oy * 2 + 4)
+
   const blob = (color: string, x: number, y: number, r: number, alpha = 1) => {
     const [cr, cg, cb] = hexToRgb(color)
     const g = o.createRadialGradient(x, y, 0, x, y, r)
     g.addColorStop(0, `rgba(${cr},${cg},${cb},${alpha})`)
     g.addColorStop(1, `rgba(${cr},${cg},${cb},0)`)
     o.fillStyle = g
-    o.fillRect(0, 0, lw, lh)
+    fillAll()
   }
 
   // 'image' with no image loaded falls back to mesh
@@ -145,7 +169,7 @@ function paintField(
   switch (style) {
     case 'image': {
       const img = imageField!
-      const k = Math.max(lw / img.width, lh / img.height)
+      const k = Math.max((lw + ox * 2) / img.width, (lh + oy * 2) / img.height)
       const dw = img.width * k
       const dh = img.height * k
       o.drawImage(img, (lw - dw) / 2, (lh - dh) / 2, dw, dh)
@@ -153,7 +177,7 @@ function paintField(
     }
     case 'mesh': {
       o.fillStyle = anchor(cols, s.mode, rand)
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       const blobs: { c: string; x: number; y: number; r: number }[] = []
       for (const c of cols) {
         const n = rand() < 0.45 ? 2 : 1
@@ -173,7 +197,7 @@ function paintField(
       // stacked soft ridges, like layered hills — each band's fill fades into the next
       const order = shuffled(cols, rand)
       o.fillStyle = order[0]
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       const rot = (rand() - 0.5) * 0.7
       const ext = maxDim
       const n = order.length
@@ -196,13 +220,21 @@ function paintField(
         const b = bands[i]
         const nextY = i + 1 < bands.length ? bands[i + 1].yBase : lh + ext
         const nextC = i + 1 < bands.length ? bands[i + 1].c : b.c
-        const g = o.createLinearGradient(0, b.yBase, 0, Math.max(b.yBase + 2, nextY))
-        g.addColorStop(0, b.c)
+        // feather: the band fades in from transparent above its crest, so the
+        // ridge silhouette melts into the band beneath instead of cutting
+        const feather = b.amp * 2 + lh * 0.04
+        const top = b.yBase - b.amp - feather
+        const opaqueY = b.yBase + b.amp
+        const [br, bg, bb] = hexToRgb(b.c)
+        const g = o.createLinearGradient(0, top, 0, Math.max(top + 4, nextY))
+        const tOpaque = Math.min(0.92, (opaqueY - top) / Math.max(4, nextY - top))
+        g.addColorStop(0, `rgba(${br},${bg},${bb},0)`)
+        g.addColorStop(tOpaque, `rgba(${br},${bg},${bb},1)`)
         g.addColorStop(1, nextC)
         o.beginPath()
-        o.moveTo(-ext, b.yBase + Math.sin(-ext * b.freq + b.phase) * b.amp)
+        o.moveTo(-ext, b.yBase + Math.sin(-ext * b.freq + b.phase) * b.amp - feather)
         for (let x = -ext; x <= lw + ext; x += 1) {
-          o.lineTo(x, b.yBase + Math.sin(x * b.freq + b.phase) * b.amp)
+          o.lineTo(x, b.yBase + Math.sin(x * b.freq + b.phase) * b.amp - feather)
         }
         o.lineTo(lw + ext, lh + ext)
         o.lineTo(-ext, lh + ext)
@@ -216,7 +248,7 @@ function paintField(
     case 'bloom': {
       // composed corner glows over an anchor field
       o.fillStyle = anchor(cols, s.mode, rand)
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       const corners: [number, number][] = shuffled(
         [
           [0, 0],
@@ -248,7 +280,7 @@ function paintField(
       // varied position, width, squash, and layered stops
       const bgc = anchor(cols, s.mode, rand)
       o.fillStyle = bgc
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       const bgL = luminance(bgc)
       const rest = cols.filter((c) => c !== bgc)
       // core = strongest contrast against the field, melting outward toward it
@@ -299,7 +331,7 @@ function paintField(
         g.addColorStop(Math.min(1, Math.max(0, t + jitter)), c)
       })
       o.fillStyle = g
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       const bright = byLum[byLum.length - 1]
       const [br, bg2, bb] = hexToRgb(bright)
       const gy = brightBottom ? lh * (0.72 + rand() * 0.2) : lh * (0.08 + rand() * 0.2)
@@ -321,7 +353,7 @@ function paintField(
     case 'beams': {
       // long diagonal streaks sharing one dominant direction, like light through glass
       o.fillStyle = anchor(cols, s.mode, rand)
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       const theta = rand() * Math.PI
       const streaks: { c: string; x: number; y: number; r: number; a: number; st: number }[] = []
       for (const c of cols) {
@@ -357,7 +389,7 @@ function paintField(
       const sorted = [...cols].sort((a, b) => luminance(a) - luminance(b))
       const [dr, dg, db] = hexToRgb(sorted[0])
       o.fillStyle = rgbToHex(dr * 0.25, dg * 0.25, db * 0.25)
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       const bright = sorted.slice(-2)
       const nBeams = rand() < 0.4 && bright.length > 1 ? 2 : 1
       for (let i = 0; i < nBeams; i++) {
@@ -401,7 +433,7 @@ function paintField(
       }).sort((a, b) => a - b)
       order.forEach((c, i) => g.addColorStop(stops[i], c))
       o.fillStyle = g
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       // one soft accent so it isn't perfectly flat
       const accent = order[Math.floor(rand() * order.length)]
       blob(accent, rand() * lw, rand() * lh, (0.4 + rand() * 0.4) * maxDim, 0.45)
@@ -433,7 +465,7 @@ function paintField(
         g.addColorStop(Math.min(1, Math.max(0, t + jitter)), c)
       })
       o.fillStyle = g
-      o.fillRect(0, 0, lw, lh)
+      fillAll()
       break
     }
   }
@@ -552,35 +584,80 @@ export function renderGradient(
   const ctx = canvas.getContext('2d')!
   const rand = mulberry32(s.seed)
 
-  // 1. paint the color field at low resolution — upscaling does the blurring for free
+  // 1. paint the color field at low resolution — upscaling does the blurring for free.
+  // The field carries overscan margins so the view camera can pan and zoom.
   const long = Math.max(w, h)
   const lowLong = Math.round(22 + (1 - s.softness) * 150)
   const k = lowLong / long
   const lw = Math.max(6, Math.round(w * k))
   const lh = Math.max(6, Math.round(h * k))
+  const oxI = Math.round(lw * OVERSCAN)
+  const oyI = Math.round(lh * OVERSCAN)
   const off = document.createElement('canvas')
-  off.width = lw
-  off.height = lh
-  paintField(off.getContext('2d')!, lw, lh, s, rand, imageField)
+  off.width = lw + oxI * 2
+  off.height = lh + oyI * 2
+  const octx = off.getContext('2d')!
+  octx.translate(oxI, oyI)
+  paintField(octx, lw, lh, s, rand, imageField)
 
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(off, 0, 0, w, h)
+  // camera: source rect within the extended field
+  const view = s.view ?? DEFAULT_VIEW
+  const vs = Math.min(VIEW_MAX_SCALE, Math.max(VIEW_MIN_SCALE, view.s))
+  const sw = lw / vs
+  const sh = lh / vs
+  const sx = Math.max(0, Math.min(off.width - sw, oxI + view.x * lw - sw / 2))
+  const sy = Math.max(0, Math.min(off.height - sh, oyI + view.y * lh - sh / 2))
 
-  // 2. film grain
-  if (s.grain > 0) {
-    const pat = ctx.createPattern(getNoise(), 'repeat')!
-    const gs = Math.max(1, w / 1600)
-    pat.setTransform(new DOMMatrix().scale(gs))
-    ctx.save()
-    ctx.fillStyle = pat
-    ctx.globalCompositeOperation = 'overlay'
-    ctx.globalAlpha = Math.min(1, s.grain * 0.85)
-    ctx.fillRect(0, 0, w, h)
-    ctx.globalCompositeOperation = 'soft-light'
-    ctx.globalAlpha = Math.min(1, s.grain * 0.5)
-    ctx.fillRect(0, 0, w, h)
-    ctx.restore()
+  // 2. upscale + grain, by texture character
+  const gtype: GrainType = s.grainType ?? 'film'
+  if (gtype === 'pixel' || gtype === 'dither') {
+    // mosaic grain: mid-res block canvas with per-block color noise,
+    // then nearest-neighbor upscale for that chunky dithered look
+    const block = gtype === 'pixel' ? Math.max(3, Math.round(w / 200)) : Math.max(2, Math.round(w / 440))
+    const mw = Math.ceil(w / block)
+    const mh = Math.ceil(h / block)
+    const mid = document.createElement('canvas')
+    mid.width = mw
+    mid.height = mh
+    const mctx = mid.getContext('2d')!
+    mctx.imageSmoothingEnabled = true
+    mctx.imageSmoothingQuality = 'high'
+    mctx.drawImage(off, sx, sy, sw, sh, 0, 0, mw, mh)
+    if (s.grain > 0) {
+      const img = mctx.getImageData(0, 0, mw, mh)
+      const d = img.data
+      const nrand = mulberry32((s.seed ^ 0x51ab7e55) >>> 0)
+      const amp = s.grain * (gtype === 'pixel' ? 58 : 74)
+      for (let i = 0; i < d.length; i += 4) {
+        const luma = (nrand() * 2 - 1) * amp
+        d[i] += luma + (nrand() * 2 - 1) * amp * 0.35
+        d[i + 1] += luma + (nrand() * 2 - 1) * amp * 0.35
+        d[i + 2] += luma + (nrand() * 2 - 1) * amp * 0.35
+      }
+      mctx.putImageData(img, 0, 0)
+    }
+    ctx.imageSmoothingEnabled = false
+    ctx.drawImage(mid, 0, 0, mw * block, mh * block)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+  } else {
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(off, sx, sy, sw, sh, 0, 0, w, h)
+    if (s.grain > 0) {
+      const pat = ctx.createPattern(getNoise(), 'repeat')!
+      const gs = Math.max(1, w / 1600) * (gtype === 'coarse' ? 2.6 : 1)
+      pat.setTransform(new DOMMatrix().scale(gs))
+      ctx.save()
+      ctx.fillStyle = pat
+      ctx.globalCompositeOperation = 'overlay'
+      ctx.globalAlpha = Math.min(1, s.grain * 0.85)
+      ctx.fillRect(0, 0, w, h)
+      ctx.globalCompositeOperation = 'soft-light'
+      ctx.globalAlpha = Math.min(1, s.grain * (gtype === 'coarse' ? 0.65 : 0.5))
+      ctx.fillRect(0, 0, w, h)
+      ctx.restore()
+    }
   }
 
   // 3. vignette

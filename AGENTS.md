@@ -24,6 +24,7 @@ http://localhost:5173/?image=https://example.com/pic.jpg&style=image
 | `colors` | `ff6a00,d4327e,1a1a40` (2–6 hex, `#` optional, `,` or `-` separated) | overrides generated palette |
 | `ratio` | `16:9`, `1:1`, `9:16`, … (`:`/`x`//` separators) | canvas aspect |
 | `grain` `softness` `vignette` | `0`–`1` | texture sliders |
+| `grainType` | `film` `coarse` `pixel` `dither` | grain character: fine film, big particles, chunky mosaic, fine mosaic |
 | `ascii` | `1`/`0` | ascii overlay on/off |
 | `asciiSize` | `7`–`32` | glyph cell size |
 | `asciiOpacity` `asciiDensity` `asciiContrast` | `0`–`1` | overlay strength / coverage / band crispness |
@@ -40,6 +41,7 @@ or a browser-tool `javascript_exec`):
 ```js
 grainient.get()                      // → current settings {seed, style, mode, colors, grain, ..., ratio, hasImage}
 grainient.set({ style: 'waves', colors: ['#ff6a00', '#1a1a40'], grain: 0.7, ratio: '4:5' })
+grainient.set({ view: { x: 0.6, y: 0.4, s: 1.5 } })  // pan/zoom camera; x/y center (0.5 default), s zoom (0.5–4)
 grainient.lucky()                    // new palette + layout (respects current mode)
 grainient.shuffle()                  // new layout, same palette
 grainient.back()                     // undo — restore the previous gradient (← / ⌫ in the UI)

@@ -55,7 +55,7 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font: 14px/1.5 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -78,6 +78,31 @@ body {
 .stage canvas {
   border-radius: 14px;
   box-shadow: var(--canvas-shadow);
+  cursor: grab;
+  touch-action: none;
+}
+
+.stage canvas.panning {
+  cursor: grabbing;
+}
+
+.reset-view {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--menu-bg);
+  color: var(--text);
+  font-size: 12.5px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  z-index: 6;
+}
+
+.reset-view:hover {
+  background: var(--surface-2);
 }
 
 .drop-overlay {
