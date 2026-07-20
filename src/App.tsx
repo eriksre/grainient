@@ -41,7 +41,7 @@ function makeInitial(): Settings {
   const seed = newSeed()
   return {
     seed,
-    style: 'mesh',
+    style: 'rise',
     mode: 'mix',
     colors: randomPalette(mulberry32(seed), 'mix'),
     grain: 0.49,
