@@ -127,6 +127,7 @@ body {
   flex-shrink: 0;
   padding: 26px 22px;
   overflow-y: auto;
+  overflow-x: hidden;
   border-left: 1px solid var(--line);
   background: var(--panel);
   display: flex;
@@ -207,7 +208,7 @@ button {
 
 .row {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .ghost {
@@ -378,8 +379,8 @@ input[type='range']::-moz-range-thumb {
 
 /* compact action row */
 .row .ghost {
-  padding: 6px 10px;
-  font-size: 12.5px;
+  padding: 6px 8px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -420,7 +421,7 @@ input[type='range']::-moz-range-thumb {
 /* bookmark save */
 .bookmark {
   flex-shrink: 0;
-  width: 32px;
+  width: 28px;
   align-self: stretch;
   border-radius: 9px;
   border: 1px solid var(--line);
