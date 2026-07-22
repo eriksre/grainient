@@ -1,0 +1,12 @@
+# grainient
+
+grainient is a client-only studio for grainy, seeded, deterministic gradients
+(mesh / bloom / rise / waves / ascii overlays / stitched multi-section pages)
+meant to be driven by AI agents.
+
+- Agent guide (URL params, window.grainient JS API, shareable seeds, HTML embeds): /agents.md
+- Embeddable runtime for websites: /embed.js  (auto-renders any element with a
+  data-grainient="<seed>" or data-grainient-page="<page seed>" attribute)
+- Configure a gradient by opening the app with URL params, e.g. /?style=rise&seed=42&ratio=16:9
+- Every gradient has a one-line shareable seed: grainient:v1?style=…&seed=…  (see /agents.md)
+- Whole pages of stitched, seam-blended gradients share the same way: grainient-page:v1?blend=…

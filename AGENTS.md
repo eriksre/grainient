@@ -1,84 +1,51 @@
-# grainient — agent guide
+# AGENTS.md — working on this repo
 
-grainient is a client-only gradient studio. AI agents can drive it two ways without
-touching the UI: **URL query params** (declarative, zero JS) or the **`window.grainient`
-JS API** (imperative, returns image data). Start the app with `npm run dev`
-(default: http://localhost:5173).
+grainient is a client-only React + Vite app (deployed on Cloudflare) that generates
+grainy, seeded, deterministic gradients. This file is for agents (and humans) editing
+the codebase. The guide for agents *driving the deployed app* lives at
+[public/agents.md](public/agents.md), served on the site at `/agents.md`.
 
-## 1. URL query params
+## Commands
 
-Open the app with params and the gradient is fully configured on load:
-
-```
-http://localhost:5173/?style=mesh&mode=dark&seed=1234&ratio=16:9&grain=0.6&ascii=1
-http://localhost:5173/?colors=ff6a00,d4327e,1a1a40&style=waves&ratio=9:16
-http://localhost:5173/?mode=light&download=webp        ← auto-downloads a webp then stays open
-http://localhost:5173/?image=https://example.com/pic.jpg&style=image
+```sh
+npm install
+npm run dev      # → http://localhost:5173
+npm run build    # tsc -b && vite build → dist/client (site) + dist/server (worker)
+npm run lint     # oxlint
 ```
 
-| param | values | notes |
-| --- | --- | --- |
-| `seed` | integer | deterministic layout; same seed + settings = same image |
-| `style` | `mesh` `bloom` `rise` `set` `waves` `horizon` `beams` `spotlight` `linear` `radial` `image` | `image` needs `image=` or a previously dropped image |
-| `mode` | `dark` `light` `mix` | palette family; also flips ascii placement automatically |
-| `colors` | `ff6a00,d4327e,1a1a40` (2–6 hex, `#` optional, `,` or `-` separated) | overrides generated palette |
-| `ratio` | `16:9`, `1:1`, `9:16`, … (`:`/`x`//` separators) | canvas aspect |
-| `grain` `softness` `vignette` | `0`–`1` | texture sliders |
-| `grainType` | `film` `coarse` `pixel` `dither` | grain character: fine film, big particles, chunky mosaic, fine mosaic |
-| `ascii` | `1`/`0` | ascii overlay on/off |
-| `asciiSize` | `7`–`32` | glyph cell size |
-| `asciiOpacity` `asciiDensity` `asciiContrast` | `0`–`1` | overlay strength / coverage / band crispness |
-| `asciiSet` | `classic` `code` `dots` `heavy` | glyph vocabulary |
-| `image` | URL or data-URL | imports palette + shape field (subject to CORS) |
-| `format` | `png` `jpg` `webp` | preselects the export format |
-| `download` | `png` `jpg` `webp` | auto-triggers a file download after first paint |
+## Map
 
-## 2. `window.grainient` JS API
+| path | what it is |
+| --- | --- |
+| `src/engine.ts` | canvas render engine: color-field styles, grain, vignette, ascii overlay. Pure, seeded, DOM-only deps |
+| `src/palette.ts` | palette generation (per-mode schemes, harmonizer) + image palette/shape import |
+| `src/code.ts` | shareable seeds: URL-param parsing, `grainient:v1?…` encode/decode, `grainient-page:v1?blend=…` page seeds |
+| `src/stitch.ts` | stitched pages: renders sections into one tall canvas with feathered seam cross-fades |
+| `src/App.tsx` | the whole UI + the `window.grainient` agent API + URL-param handling |
+| `src/embed-entry.ts` | standalone embed runtime: mounts `[data-grainient]` / `[data-grainient-page]` elements, re-renders on resize |
+| `src/export-html.ts` | builds the self-contained HTML export (inlines the embed runtime via `virtual:grainient-embed`) |
+| `build/embed-vite-plugin.ts` | bundles the embed runtime (nested vite build) → virtual module + `/embed.js` |
+| `public/agents.md`, `public/llms.txt` | agent-facing site docs, served verbatim |
+| `worker/index.ts` | Cloudflare worker: static asset passthrough |
 
-Available once the page has loaded (e.g. via Playwright `page.evaluate`, puppeteer,
-or a browser-tool `javascript_exec`):
+## Invariants — do not break these
 
-```js
-grainient.get()                      // → current settings {seed, style, mode, colors, grain, ..., ratio, hasImage}
-grainient.set({ style: 'waves', colors: ['#ff6a00', '#1a1a40'], grain: 0.7, ratio: '4:5' })
-grainient.set({ view: { x: 0.6, y: 0.4, s: 1.5 } })  // pan/zoom camera; x/y center (0.5 default), s zoom (0.5–4)
-grainient.lucky()                    // new palette + layout (respects current mode)
-grainient.shuffle()                  // new layout, same palette
-grainient.back()                     // undo — restore the previous gradient (← / ⌫ in the UI)
-grainient.forward()                  // redo — replay undone gradients; new lucky when the queue is empty (→)
-grainient.export('webp')             // → data URL string at 2880px long edge (sync)
-grainient.export('jpg', 1200)        // custom size
-grainient.download('png')            // trigger a real file download
-await grainient.fromImage(url)       // import palette + shape from an image URL, returns colors
-await grainient.fromImage(url, false) // palette only, keep current style
-```
+1. **Determinism.** Identical settings at a given canvas size must render
+   pixel-identically, and the preview must match every export. All randomness flows
+   through `mulberry32(seed)`; never call `Math.random()` inside render paths.
+2. **Seeds round-trip.** `encodeCode(decodeCode(x))` must reproduce `x` for canonical
+   seeds. Seeds double as app URL params and as embed `data-` attributes — the three
+   share one parser (`settingsFromParams`).
+3. **Every capability ships on all surfaces.** UI control ⇄ URL param ⇄
+   `window.grainient` method ⇄ (where it makes sense) seed field. When you add one,
+   add the others and document them in `public/agents.md`.
+4. **The embed runtime stays self-contained.** `embed-entry.ts` may import only from
+   `engine/code/palette/stitch`; it is bundled standalone and inlined into exports.
 
-`set` accepts partial `ascii` objects too: `grainient.set({ ascii: { enabled: true, size: 18 } })`.
+## Conventions
 
-### Grab an image in one shot (Playwright example)
-
-```js
-const dataUrl = await page.evaluate(() => {
-  grainient.set({ style: 'mesh', mode: 'dark', seed: 42, ratio: '16:9', grain: 0.6 })
-  return grainient.export('webp')
-})
-// strip "data:image/webp;base64," and write the rest to a file
-```
-
-## Determinism
-
-Rendering is fully seeded: identical `{seed, style, mode, colors, grain, softness,
-vignette, ascii, ratio}` always produce pixel-identical output, and the preview matches
-the export. Randomness only enters through `lucky()`/`shuffle()` (which pick a new seed).
-
-## Style cheat-sheet
-
-- `mesh` — soft directionless color-blob field (the signature look)
-- `bloom` — composed corner glows over an anchor field
-- `rise` / `set` — a radial dome anchored to the bottom / top edge, varied position, width, and squash
-- `waves` — stacked rippling ridges that blend into each other, like layered hills
-- `horizon` — soft strata with a squashed sun-glow near the brightest edge
-- `beams` — long streaks sharing one dominant diagonal
-- `spotlight` — near-black stage with a hot squashed beam of light
-- `linear` / `radial` — classic directional fades (radial always orders colors by luminance for a clean glow)
-- `image` — uses a dropped/imported image as the gradient's color field (its "shape")
+- Plain CSS in `src/index.css`, design tokens as `--vars`, lowercase UI copy.
+- User-facing name for a shareable code is **seed** ("share seed", "page seed").
+- Comments explain *why*, not *what*; match the existing terse style.
+- After changes run `npm run build && npm run lint`; both must pass clean.

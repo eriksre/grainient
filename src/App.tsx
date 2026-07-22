@@ -5,28 +5,29 @@ import {
   renderGradient,
   VIEW_MAX_SCALE,
   VIEW_MIN_SCALE,
-  type AsciiSet,
-  type GrainType,
   type Mode,
   type Settings,
   type Style,
   type ViewTransform,
 } from './engine'
 import { importImage, importImageUrl, randomPalette } from './palette'
-
-const RATIOS: [string, number][] = [
-  ['21:9', 21 / 9],
-  ['16:9', 16 / 9],
-  ['3:2', 3 / 2],
-  ['1:1', 1],
-  ['4:5', 4 / 5],
-  ['9:16', 9 / 16],
-]
-
-const STYLES: Style[] = ['mesh', 'bloom', 'rise', 'set', 'waves', 'horizon', 'beams', 'spotlight', 'linear', 'radial']
-const MODES: Mode[] = ['dark', 'light', 'mix']
-const ASCII_SETS_UI: AsciiSet[] = ['classic', 'code', 'dots', 'heavy']
-const GRAIN_TYPES: GrainType[] = ['film', 'coarse', 'pixel', 'dither']
+import {
+  ASCII_SETS_UI,
+  baseSettings,
+  decodeCode,
+  decodePageCode,
+  encodeCode,
+  GRAIN_TYPES,
+  MODES,
+  parseRatio,
+  ratioParam,
+  RATIOS,
+  settingsFromParams,
+  STYLES,
+  DEFAULT_BLEND,
+  type DecodedGradient,
+} from './code'
+import { pageHeightUnits, renderPage } from './stitch'
 
 export type Format = 'png' | 'jpg' | 'webp'
 const FORMATS: Format[] = ['png', 'jpg', 'webp']
@@ -37,93 +38,25 @@ const EXPORT_LONG = 2880
 
 const newSeed = () => Math.floor(Math.random() * 2 ** 31)
 
-function makeInitial(): Settings {
-  const seed = newSeed()
-  return {
-    seed,
-    style: 'rise',
-    mode: 'mix',
-    colors: randomPalette(mulberry32(seed), 'mix'),
-    grain: 0.49,
-    grainType: 'film',
-    softness: 0.45,
-    vignette: 0.12,
-    ascii: { enabled: true, size: 11, opacity: 0.67, density: 0.51, contrast: 0.3, set: 'code' },
-  }
-}
+const makeInitial = (): Settings => baseSettings(newSeed())
 
 function dims(ratio: number, long: number): [number, number] {
   return ratio >= 1 ? [long, Math.round(long / ratio)] : [Math.round(long * ratio), long]
 }
 
-function parseRatio(v: string | null): number | null {
-  if (!v) return null
-  const m = v.match(/^(\d+(?:\.\d+)?)[:x/](\d+(?:\.\d+)?)$/)
-  if (!m) return null
-  const r = Number(m[1]) / Number(m[2])
-  return isFinite(r) && r > 0 ? r : null
+/** decode stored page sections into render-ready specs */
+function specsFromSections(sections: { code: string; ratio: number }[]) {
+  return sections
+    .map((sec) => {
+      const d = decodeCode(sec.code)
+      return d ? { settings: d.settings, ratio: d.ratio ?? sec.ratio } : null
+    })
+    .filter((s): s is { settings: Settings; ratio: number } => s !== null)
 }
 
-/** apply ?query params onto settings; returns null if no relevant params present */
-function settingsFromParams(q: URLSearchParams, base: Settings): Settings | null {
-  let touched = false
-  const s: Settings = { ...base, ascii: { ...base.ascii } }
-  const num = (key: string, cb: (v: number) => void) => {
-    const v = q.get(key)
-    if (v !== null && !isNaN(Number(v))) {
-      cb(Number(v))
-      touched = true
-    }
-  }
-  const mode = q.get('mode')
-  if (mode && (MODES as string[]).includes(mode)) {
-    s.mode = mode as Mode
-    touched = true
-  }
-  num('seed', (v) => (s.seed = Math.floor(v)))
-  // seed or mode given without explicit colors → derive a palette from them
-  if (touched && !q.get('colors')) {
-    s.colors = randomPalette(mulberry32(s.seed), s.mode)
-  }
-  num('grain', (v) => (s.grain = Math.min(1, Math.max(0, v))))
-  const gtype = q.get('grainType')
-  if (gtype && (GRAIN_TYPES as string[]).includes(gtype)) {
-    s.grainType = gtype as GrainType
-    touched = true
-  }
-  num('softness', (v) => (s.softness = Math.min(1, Math.max(0, v))))
-  num('vignette', (v) => (s.vignette = Math.min(1, Math.max(0, v))))
-  num('asciiSize', (v) => (s.ascii.size = Math.min(32, Math.max(7, v))))
-  num('asciiOpacity', (v) => (s.ascii.opacity = Math.min(1, Math.max(0, v))))
-  num('asciiDensity', (v) => (s.ascii.density = Math.min(1, Math.max(0, v))))
-  num('asciiContrast', (v) => (s.ascii.contrast = Math.min(1, Math.max(0, v))))
-  const aset = q.get('asciiSet')
-  if (aset && (ASCII_SETS_UI as string[]).includes(aset)) {
-    s.ascii.set = aset as AsciiSet
-    touched = true
-  }
-  const style = q.get('style')
-  if (style && ([...STYLES, 'image'] as string[]).includes(style)) {
-    s.style = style as Style
-    touched = true
-  }
-  const ascii = q.get('ascii')
-  if (ascii !== null) {
-    s.ascii.enabled = ascii === '1' || ascii === 'true'
-    touched = true
-  }
-  const colors = q.get('colors')
-  if (colors) {
-    const list = colors
-      .split(/[,-]/)
-      .map((c) => c.trim().replace(/^#?/, '#'))
-      .filter((c) => /^#[0-9a-fA-F]{6}$/.test(c) || /^#[0-9a-fA-F]{3}$/.test(c))
-    if (list.length >= 2) {
-      s.colors = list.slice(0, 6)
-      touched = true
-    }
-  }
-  return touched ? s : null
+/** one-line page seed straight from the stored section codes */
+function pageSeedText(sections: { code: string }[], blend: number, sep = '\n'): string {
+  return [`grainient-page:v1?blend=${Math.round(blend * 100) / 100}`, ...sections.map((s) => s.code)].join(sep)
 }
 
 function Slider({
@@ -182,6 +115,34 @@ function readLibrary(): LibItem[] {
   } catch {
     return []
   }
+}
+
+/** one stitched-page section: the code is the source of truth, thumb is for the UI */
+interface PageSec {
+  id: string
+  code: string
+  ratio: number
+  thumb: string
+}
+
+const PAGE_KEY = 'grainient.page.v1'
+
+interface PageStore {
+  sections: PageSec[]
+  blend: number
+}
+
+function readPage(): PageStore {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PAGE_KEY) ?? 'null')
+    if (Array.isArray(raw)) return { sections: raw, blend: DEFAULT_BLEND } // legacy shape
+    if (raw && Array.isArray(raw.sections)) {
+      return { sections: raw.sections, blend: typeof raw.blend === 'number' ? raw.blend : DEFAULT_BLEND }
+    }
+  } catch {
+    // fall through
+  }
+  return { sections: [], blend: DEFAULT_BLEND }
 }
 
 /** canonical identity of a gradient — used to prevent duplicate saves */
@@ -247,6 +208,17 @@ export default function App() {
   const [hexDraft, setHexDraft] = useState('')
   const [dlOpen, setDlOpen] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [codeCopied, setCodeCopied] = useState(false)
+  const [paletteCopied, setPaletteCopied] = useState(false)
+  const [pageCopied, setPageCopied] = useState(false)
+  const [codeDraft, setCodeDraft] = useState('')
+  const [pasteMsg, setPasteMsg] = useState<string | null>(null)
+  const [ratioDraft, setRatioDraft] = useState('')
+  const [sections, setSections] = useState<PageSec[]>(() => readPage().sections)
+  const [blend, setBlend] = useState<number>(() => readPage().blend)
+  // page mode: the stage shows the stitched page instead of the single gradient.
+  // Defaults on when a built page exists — the page is what you're working on.
+  const [pageMode, setPageMode] = useState<boolean>(() => readPage().sections.length > 0)
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     localStorage.getItem('grainient.theme') === 'light' ? 'light' : 'dark',
   )
@@ -262,10 +234,17 @@ export default function App() {
   const [fit, setFit] = useState({ w: 800, h: 450 })
 
   // refs so the imperative agent API + history always see current state
-  const stateRef = useRef({ settings, ratio, imageField, format })
+  const stateRef = useRef({ settings, ratio, imageField, format, sections, blend, pageMode })
   useEffect(() => {
-    stateRef.current = { settings, ratio, imageField, format }
+    stateRef.current = { settings, ratio, imageField, format, sections, blend, pageMode }
   })
+
+  // page mode changes mirror into the ref immediately so chained agent-API
+  // calls within one tick (add → getCode → export) read consistent state
+  const setPageModeSync = useCallback((v: boolean) => {
+    stateRef.current.pageMode = v
+    setPageMode(v)
+  }, [])
 
   const historyRef = useRef<Snapshot[]>([])
   const futureRef = useRef<Snapshot[]>([])
@@ -322,6 +301,7 @@ export default function App() {
   }, [])
 
   const onCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (stateRef.current.pageMode && stateRef.current.sections.length > 0) return // no pan/zoom on the stitched page
     e.currentTarget.setPointerCapture(e.pointerId)
     pointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     if (pointersRef.current.size === 2) {
@@ -369,6 +349,8 @@ export default function App() {
     const c = canvasRef.current
     if (!c) return
     const onWheel = (e: WheelEvent) => {
+      // in page mode the canvas is just a preview — let the browser scroll normally
+      if (stateRef.current.pageMode && stateRef.current.sections.length > 0) return
       e.preventDefault()
       const rect = c.getBoundingClientRect()
       if (e.ctrlKey || e.metaKey) {
@@ -428,7 +410,11 @@ export default function App() {
     [pushHistory],
   )
 
-  // fit the canvas inside the stage while keeping the chosen ratio
+  // what the stage displays: the single gradient's ratio, or the whole stitched page's
+  const pageActive = pageMode && sections.length > 0
+  const stageRatio = pageActive ? 1 / Math.max(0.05, pageHeightUnits(specsFromSections(sections))) : ratio
+
+  // fit the canvas inside the stage while keeping the displayed ratio
   useEffect(() => {
     const el = stageRef.current
     if (!el) return
@@ -437,10 +423,10 @@ export default function App() {
       const cw = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
       const ch = el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
       let w = cw
-      let h = w / ratio
+      let h = w / stageRatio
       if (h > ch) {
         h = ch
-        w = h * ratio
+        w = h * stageRatio
       }
       setFit({ w: Math.max(60, Math.floor(w)), h: Math.max(60, Math.floor(h)) })
     }
@@ -448,15 +434,22 @@ export default function App() {
     ro.observe(el)
     measure()
     return () => ro.disconnect()
-  }, [ratio])
+  }, [stageRatio])
 
   // render
   useEffect(() => {
     const c = canvasRef.current
     if (!c) return
-    const [w, h] = dims(ratio, PREVIEW_LONG)
-    renderGradient(c, settings, w, h, imageField)
-  }, [settings, ratio, imageField])
+    if (pageActive) {
+      const specs = specsFromSections(sections)
+      const units = pageHeightUnits(specs)
+      const w = units >= 1 ? Math.max(320, Math.round(PREVIEW_LONG / units)) : PREVIEW_LONG
+      renderPage(c, specs, w, blend)
+    } else {
+      const [w, h] = dims(ratio, PREVIEW_LONG)
+      renderGradient(c, settings, w, h, imageField)
+    }
+  }, [settings, ratio, imageField, pageActive, sections, blend])
 
   // space / → = lucky (→ replays the redo queue first), ⌫ / ← = back.
   // Buttons keep focus after a click, so shortcuts must still fire when a button
@@ -531,13 +524,28 @@ export default function App() {
     }
   }, [onFiles])
 
-  const exportDataURL = useCallback((fmt: Format = 'png', long = EXPORT_LONG): string => {
-    const { settings, ratio, imageField } = stateRef.current
-    const [w, h] = dims(ratio, long)
-    const c = document.createElement('canvas')
-    renderGradient(c, settings, w, h, imageField)
-    return c.toDataURL(MIME[fmt], 0.92)
+  /** render whatever the stage shows — the single gradient, or the stitched page in page mode */
+  const renderCurrentTo = useCallback((c: HTMLCanvasElement, long: number) => {
+    const { settings, ratio, imageField, pageMode, sections, blend } = stateRef.current
+    const specs = pageMode && sections.length > 0 ? specsFromSections(sections) : []
+    if (specs.length > 0) {
+      const units = pageHeightUnits(specs)
+      const w = units >= 1 ? Math.max(320, Math.round(long / units)) : long
+      renderPage(c, specs, w, blend)
+    } else {
+      const [w, h] = dims(ratio, long)
+      renderGradient(c, settings, w, h, imageField)
+    }
   }, [])
+
+  const exportDataURL = useCallback(
+    (fmt: Format = 'png', long = EXPORT_LONG): string => {
+      const c = document.createElement('canvas')
+      renderCurrentTo(c, long)
+      return c.toDataURL(MIME[fmt], 0.92)
+    },
+    [renderCurrentTo],
+  )
 
   const download = useCallback(
     (fmt?: Format) => {
@@ -545,9 +553,13 @@ export default function App() {
       const url = exportDataURL(f)
       const a = document.createElement('a')
       a.href = url
-      const r = stateRef.current.ratio
-      const rName = (RATIOS.find(([, rr]) => Math.abs(r - rr) < 0.001)?.[0] ?? r.toFixed(2)).replace(':', 'x')
-      a.download = `grainient-${stateRef.current.settings.seed}-${rName}.${f}`
+      const { pageMode, sections, settings, ratio } = stateRef.current
+      if (pageMode && sections.length > 0) {
+        a.download = `grainient-page-${sections.length}sections.${f}`
+      } else {
+        const rName = (RATIOS.find(([, rr]) => Math.abs(ratio - rr) < 0.001)?.[0] ?? ratio.toFixed(2)).replace(':', 'x')
+        a.download = `grainient-${settings.seed}-${rName}.${f}`
+      }
       a.click()
     },
     [exportDataURL],
@@ -633,24 +645,243 @@ export default function App() {
     return () => document.removeEventListener('mousedown', close)
   }, [dlOpen])
 
-  // copy the rendered gradient to the clipboard as a PNG
+  // copy the rendered gradient to the clipboard — as JPG where the browser
+  // allows writing it, falling back to PNG (most browsers only accept PNG)
   const copyImage = useCallback(async () => {
     try {
-      const { settings, ratio, imageField } = stateRef.current
-      const [w, h] = dims(ratio, EXPORT_LONG)
       const c = document.createElement('canvas')
-      renderGradient(c, settings, w, h, imageField)
+      renderCurrentTo(c, EXPORT_LONG)
       // promise form so Safari accepts it too
-      const blob = new Promise<Blob>((resolve, reject) =>
-        c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png'),
-      )
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      const blobFor = (type: string) =>
+        new Promise<Blob>((resolve, reject) =>
+          c.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), type, 0.92),
+        )
+      const CI = ClipboardItem as unknown as { supports?: (t: string) => boolean }
+      const type = CI.supports?.('image/jpeg') ? 'image/jpeg' : 'image/png'
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ [type]: blobFor(type) })])
+      } catch (err) {
+        if (type === 'image/png') throw err
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobFor('image/png') })])
+      }
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
     } catch (err) {
       console.error('copy failed', err)
     }
+  }, [renderCurrentTo])
+
+  // --- shareable seeds ---
+  const copySeed = useCallback(async () => {
+    try {
+      const { settings, ratio, pageMode, sections, blend } = stateRef.current
+      const text =
+        pageMode && sections.length > 0 ? pageSeedText(sections, blend) : encodeCode(settings, ratio)
+      await navigator.clipboard.writeText(text)
+      setCodeCopied(true)
+      setTimeout(() => setCodeCopied(false), 1400)
+    } catch (err) {
+      console.error('copy failed', err)
+    }
   }, [])
+
+  const copyPalette = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(stateRef.current.settings.colors.join(', '))
+      setPaletteCopied(true)
+      setTimeout(() => setPaletteCopied(false), 1400)
+    } catch (err) {
+      console.error('copy failed', err)
+    }
+  }, [])
+
+  const renderThumb = useCallback((s: Settings, r: number): string => {
+    const [w, h] = dims(r, 320)
+    const c = document.createElement('canvas')
+    renderGradient(c, s, w, h, s.style === 'image' ? stateRef.current.imageField : null)
+    return c.toDataURL('image/jpeg', 0.7)
+  }, [])
+
+  // sections are computed against the ref (not a functional update) so that
+  // chained agent-API calls within one tick stay consistent
+  const persistPage = useCallback(
+    (update: (prev: PageSec[]) => PageSec[], blendOverride?: number) => {
+      if (blendOverride !== undefined) {
+        setBlend(blendOverride)
+        stateRef.current.blend = blendOverride
+      }
+      const next = update(stateRef.current.sections)
+      stateRef.current.sections = next
+      try {
+        localStorage.setItem(
+          PAGE_KEY,
+          JSON.stringify({ sections: next, blend: blendOverride ?? stateRef.current.blend }),
+        )
+      } catch (e) {
+        console.error('page save failed', e)
+      }
+      if (next.length === 0) setPageModeSync(false)
+      setSections(next)
+    },
+    [setPageModeSync],
+  )
+
+  const persistBlend = useCallback(
+    (v: number) => persistPage((prev) => prev, v),
+    [persistPage],
+  )
+
+  const toSections = useCallback(
+    (decoded: DecodedGradient[]): PageSec[] =>
+      decoded.map((d) => {
+        const r = d.ratio ?? 16 / 9
+        return {
+          id: Math.random().toString(36).slice(2),
+          code: encodeCode(d.settings, r),
+          ratio: r,
+          thumb: renderThumb(d.settings, r),
+        }
+      }),
+    [renderThumb],
+  )
+
+  /** apply a pasted gradient seed or page seed; returns what it did (null = invalid) */
+  const applyCodeText = useCallback(
+    (text: string): 'gradient' | 'page' | null => {
+      const decoded = decodePageCode(text)
+      if (!decoded) return null
+      if (decoded.sections.length === 1) {
+        pushHistory()
+        setSettings(decoded.sections[0].settings)
+        if (decoded.sections[0].ratio) setRatio(decoded.sections[0].ratio)
+        setPageModeSync(false)
+        return 'gradient'
+      }
+      persistPage(() => toSections(decoded.sections), decoded.blend)
+      setPageModeSync(true)
+      return 'page'
+    },
+    [pushHistory, persistPage, toSections, setPageModeSync],
+  )
+
+  const onCodeDraft = (v: string) => {
+    setCodeDraft(v)
+    if (!v.trim()) {
+      setPasteMsg(null)
+      return
+    }
+    const result = applyCodeText(v)
+    if (result) {
+      setCodeDraft('')
+      setPasteMsg(result === 'page' ? 'page code applied — see page builder' : 'code applied ✓')
+      setTimeout(() => setPasteMsg(null), 2600)
+    } else if (v.trim().length > 24) {
+      setPasteMsg("that doesn't look like a grainient code")
+    } else {
+      setPasteMsg(null)
+    }
+  }
+
+  const onRatioDraft = (v: string) => {
+    setRatioDraft(v)
+    const r = parseRatio(v)
+    if (r) setRatio(r)
+  }
+
+  // --- page builder: stitch multiple gradients into one scrollable page ---
+  const sectionSpecs = useCallback(() => specsFromSections(stateRef.current.sections), [])
+
+  const addSection = useCallback(() => {
+    const { settings, ratio, imageField } = stateRef.current
+    const thumb = renderThumb(settings, ratio)
+    const item: PageSec = {
+      id: Math.random().toString(36).slice(2),
+      code: encodeCode(settings, ratio),
+      ratio,
+      thumb,
+    }
+    persistPage((prev) => [...prev, item].slice(0, 16))
+    // stitching a gradient into the page also bookmarks it in the saved library
+    const key = gradKey(settings, ratio)
+    persistLib((prev) => {
+      if (prev.some((it) => gradKey(it.settings, it.ratio) === key)) return prev
+      const lib: LibItem = {
+        id: Math.random().toString(36).slice(2),
+        ts: Date.now(),
+        settings: JSON.parse(JSON.stringify(settings)),
+        ratio,
+        thumb,
+      }
+      if (settings.style === 'image' && imageField) lib.image = imageField.toDataURL('image/jpeg', 0.85)
+      return [lib, ...prev].slice(0, 40)
+    })
+    setPageModeSync(true)
+  }, [persistPage, persistLib, renderThumb, setPageModeSync])
+
+  const removeSection = useCallback(
+    (id: string) => persistPage((prev) => prev.filter((s) => s.id !== id)),
+    [persistPage],
+  )
+
+  const moveSection = useCallback(
+    (id: string, dir: -1 | 1) =>
+      persistPage((prev) => {
+        const i = prev.findIndex((s) => s.id === id)
+        const j = i + dir
+        if (i < 0 || j < 0 || j >= prev.length) return prev
+        const next = [...prev]
+        ;[next[i], next[j]] = [next[j], next[i]]
+        return next
+      }),
+    [persistPage],
+  )
+
+  const loadSection = useCallback(
+    (sec: PageSec) => {
+      const d = decodeCode(sec.code)
+      if (!d) return
+      pushHistory()
+      setSettings(d.settings)
+      if (d.ratio) setRatio(d.ratio)
+      setPageModeSync(false)
+    },
+    [pushHistory, setPageModeSync],
+  )
+
+  const copyPageCode = useCallback(async () => {
+    try {
+      const { sections, blend } = stateRef.current
+      await navigator.clipboard.writeText(pageSeedText(sections, blend))
+      setPageCopied(true)
+      setTimeout(() => setPageCopied(false), 1400)
+    } catch (err) {
+      console.error('copy failed', err)
+    }
+  }, [])
+
+  const downloadHTML = useCallback(async () => {
+    const { settings, ratio, pageMode, sections, blend } = stateRef.current
+    const m = await import('./export-html')
+    if (pageMode && sections.length > 0) {
+      m.downloadEmbedHTML(sectionSpecs(), 'grainient-page.html', { title: 'grainient page', blend })
+    } else {
+      m.downloadEmbedHTML([{ settings, ratio }], `grainient-${settings.seed}.html`)
+    }
+  }, [sectionSpecs])
+
+  const downloadPageHTML = useCallback(async () => {
+    const specs = sectionSpecs()
+    if (!specs.length) return
+    const m = await import('./export-html')
+    m.downloadEmbedHTML(specs, 'grainient-page.html', { title: 'grainient page', blend: stateRef.current.blend })
+  }, [sectionSpecs])
+
+  const previewPage = useCallback(async () => {
+    const specs = sectionSpecs()
+    if (!specs.length) return
+    const m = await import('./export-html')
+    m.previewEmbedHTML(specs, { title: 'grainient page', blend: stateRef.current.blend })
+  }, [sectionSpecs])
 
   // agent API part 1: URL params on load
   useEffect(() => {
@@ -659,8 +890,28 @@ export default function App() {
     if (fmt && (FORMATS as string[]).includes(fmt)) setFormat(fmt as Format)
     const r = parseRatio(q.get('ratio'))
     if (r) setRatio(r)
-    const fromParams = settingsFromParams(q, stateRef.current.settings)
+    // a full shareable code can ride in ?code= (individual params still override it)
+    let base = stateRef.current.settings
+    const codeParam = q.get('code')
+    if (codeParam) {
+      const d = decodeCode(codeParam)
+      if (d) {
+        base = d.settings
+        setSettings(d.settings)
+        if (d.ratio && !r) setRatio(d.ratio)
+      }
+    }
+    const fromParams = settingsFromParams(q, base)
     if (fromParams) setSettings(fromParams)
+    // ?page= accepts a full page seed, fills the page builder, and shows the page
+    const pageParam = q.get('page')
+    if (pageParam) {
+      const decoded = decodePageCode(pageParam)
+      if (decoded) {
+        persistPage(() => toSections(decoded.sections), decoded.blend)
+        setPageModeSync(true)
+      }
+    }
     const img = q.get('image')
     if (img) {
       importImageUrl(img)
@@ -674,9 +925,13 @@ export default function App() {
         })
         .catch((e) => console.error('image param failed', e))
     }
-    if (q.get('download')) {
+    const dl = q.get('download')
+    if (dl) {
       // let the first paint happen, then trigger the save
-      setTimeout(() => download((q.get('download') as Format) ?? undefined), 400)
+      setTimeout(() => {
+        if (dl === 'html') downloadHTML()
+        else download((FORMATS as string[]).includes(dl) ? (dl as Format) : undefined)
+      }, 400)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -694,16 +949,19 @@ export default function App() {
       set: (p: Record<string, unknown>) => {
         if (p.ratio !== undefined) {
           const r = typeof p.ratio === 'number' ? p.ratio : parseRatio(String(p.ratio))
-          if (r) setRatio(r)
-        }
-        setSettings((s) => {
-          const next = { ...s }
-          for (const k of ['seed', 'style', 'mode', 'colors', 'grain', 'grainType', 'softness', 'vignette', 'view'] as const) {
-            if (p[k] !== undefined) (next as unknown as Record<string, unknown>)[k] = p[k]
+          if (r) {
+            stateRef.current.ratio = r // keep chained same-tick API calls consistent
+            setRatio(r)
           }
-          if (p.ascii && typeof p.ascii === 'object') next.ascii = { ...s.ascii, ...(p.ascii as object) }
-          return next
-        })
+        }
+        const s = stateRef.current.settings
+        const next = { ...s }
+        for (const k of ['seed', 'style', 'mode', 'colors', 'grain', 'grainType', 'softness', 'vignette', 'view'] as const) {
+          if (p[k] !== undefined) (next as unknown as Record<string, unknown>)[k] = p[k]
+        }
+        if (p.ascii && typeof p.ascii === 'object') next.ascii = { ...s.ascii, ...(p.ascii as object) }
+        stateRef.current.settings = next
+        setSettings(next)
       },
       lucky,
       shuffle,
@@ -713,8 +971,64 @@ export default function App() {
       export: (fmt: Format = 'png', long = EXPORT_LONG) => exportDataURL(fmt, long),
       /** trigger a browser file download */
       download: (fmt?: Format) => download(fmt),
-      /** copy the rendered PNG to the clipboard */
+      /** copy the rendered image to the clipboard (jpg where supported, else png) */
       copy: copyImage,
+      /** one-line shareable seed for the current gradient (settings + ratio) */
+      getCode: () => encodeCode(stateRef.current.settings, stateRef.current.ratio),
+      /** apply a shareable seed / app URL / query string; returns what it applied */
+      setCode: (code: string) => applyCodeText(code),
+      /** copy the shareable seed to the clipboard (page seed while page view is active) */
+      copyCode: copySeed,
+      /** palette as css hex values, e.g. ["#ff6a00", "#1a1a40"] */
+      getPalette: () => [...stateRef.current.settings.colors],
+      /** self-contained HTML document embedding the current gradient (async) */
+      exportHTML: async () => {
+        const { settings, ratio } = stateRef.current
+        const m = await import('./export-html')
+        return m.buildEmbedHTML([{ settings, ratio }])
+      },
+      /** download the current gradient as a resizable HTML embed */
+      downloadHTML,
+      /** multi-section page builder — stitch gradients into one blended, scrollable page */
+      page: {
+        /** section seeds, top to bottom */
+        get: () => stateRef.current.sections.map((s) => s.code),
+        /** append the current gradient as a section (also bookmarks it, shows the page) */
+        add: addSection,
+        /** replace all sections from a page seed (or several seeds) */
+        setCode: (code: string) => {
+          const decoded = decodePageCode(code)
+          if (!decoded) return false
+          persistPage(() => toSections(decoded.sections), decoded.blend)
+          setPageModeSync(true)
+          return true
+        },
+        /** one shareable page seed for every section (includes the blend) */
+        getCode: () => pageSeedText(stateRef.current.sections, stateRef.current.blend),
+        remove: (index: number) => {
+          const sec = stateRef.current.sections[index]
+          if (sec) removeSection(sec.id)
+        },
+        clear: () => persistPage(() => []),
+        /** show/hide the stitched page on the stage; returns the resulting state */
+        view: (on = true) => {
+          const next = on && stateRef.current.sections.length > 0
+          setPageModeSync(next)
+          return next
+        },
+        /** get or set how much adjacent sections cross-fade (0..1) */
+        blend: (v?: number) => {
+          if (typeof v === 'number') persistBlend(Math.min(1, Math.max(0, v)))
+          return typeof v === 'number' ? Math.min(1, Math.max(0, v)) : stateRef.current.blend
+        },
+        /** self-contained HTML document with all sections stitched (async) */
+        exportHTML: async () => {
+          const m = await import('./export-html')
+          return m.buildEmbedHTML(sectionSpecs(), { title: 'grainient page', blend: stateRef.current.blend })
+        },
+        download: downloadPageHTML,
+        preview: previewPage,
+      },
       /** load an image URL/dataURL: sets palette + the 'image' shape style */
       fromImage: async (url: string, useShape = true) => {
         const { colors, field } = await importImageUrl(url)
@@ -728,7 +1042,28 @@ export default function App() {
     return () => {
       delete (window as unknown as Record<string, unknown>).grainient
     }
-  }, [lucky, shuffle, back, forward, exportDataURL, download, copyImage, pushHistory])
+  }, [
+    lucky,
+    shuffle,
+    back,
+    forward,
+    exportDataURL,
+    download,
+    copyImage,
+    pushHistory,
+    applyCodeText,
+    toSections,
+    copySeed,
+    downloadHTML,
+    addSection,
+    removeSection,
+    persistPage,
+    persistBlend,
+    setPageModeSync,
+    sectionSpecs,
+    downloadPageHTML,
+    previewPage,
+  ])
 
   const setColor = (i: number, v: string) =>
     setSettings((s) => {
@@ -762,7 +1097,7 @@ export default function App() {
     if (hex) setColor(effIdx, hex)
   }
 
-  const ratioName = RATIOS.find(([, r]) => Math.abs(ratio - r) < 0.001)?.[0] ?? 'custom'
+  const ratioName = RATIOS.find(([, r]) => Math.abs(ratio - r) < 0.001)?.[0] ?? ratioParam(ratio)
 
   const v = settings.view
   const viewChanged =
@@ -773,16 +1108,20 @@ export default function App() {
       <main className="stage" ref={stageRef}>
         <canvas
           ref={canvasRef}
-          className={panning ? 'panning' : ''}
+          className={`${panning ? 'panning' : ''} ${pageActive ? 'page' : ''}`}
           style={{ width: fit.w, height: fit.h }}
           onPointerDown={onCanvasPointerDown}
           onPointerMove={onCanvasPointerMove}
           onPointerUp={onCanvasPointerEnd}
           onPointerCancel={onCanvasPointerEnd}
-          onDoubleClick={resetView}
-          title="drag to pan · pinch or ⌘-scroll to zoom · double-click to reset"
+          onDoubleClick={pageActive ? undefined : resetView}
+          title={
+            pageActive
+              ? 'stitched page preview — click a section in the page builder to edit it'
+              : 'drag to pan · pinch or ⌘-scroll to zoom · double-click to reset'
+          }
         />
-        {viewChanged && (
+        {viewChanged && !pageActive && (
           <button className="reset-view" onClick={resetView}>
             reset view
           </button>
@@ -852,6 +1191,15 @@ export default function App() {
                     {f}
                   </button>
                 ))}
+                <button
+                  onClick={() => {
+                    setDlOpen(false)
+                    downloadHTML()
+                  }}
+                  title="self-contained html/css embed — resizes to any container"
+                >
+                  html
+                </button>
               </div>
             )}
           </div>
@@ -925,18 +1273,50 @@ export default function App() {
                 <button
                   key={name}
                   className={`chip ${Math.abs(ratio - r) < 0.001 ? 'active' : ''}`}
-                  onClick={() => setRatio(r)}
+                  onClick={() => {
+                    setRatio(r)
+                    setRatioDraft('')
+                  }}
                 >
                   {name}
                 </button>
               ))}
             </div>
+            <input
+              className="hex"
+              value={ratioDraft}
+              onChange={(e) => onRatioDraft(e.target.value)}
+              spellCheck={false}
+              placeholder="custom · 21:9, 1920x600, 2.35"
+              aria-label="custom aspect ratio"
+            />
           </div>
         </details>
 
         <details className="acc" open>
           <summary>
             colors<span className="hint">{settings.colors.length}</span>
+            <button
+              className={`copy-mini ${paletteCopied ? 'on' : ''}`}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                copyPalette()
+              }}
+              title="copy palette"
+              aria-label="copy palette to clipboard"
+            >
+              {paletteCopied ? (
+                <svg viewBox="0 0 24 24" width="13" height="13">
+                  <path d="M4.5 12.5l5 5 10-11" fill="none" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="13" height="13">
+                  <rect x="9" y="9" width="11" height="11" rx="2" fill="none" />
+                  <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" fill="none" />
+                </svg>
+              )}
+            </button>
           </summary>
           <div className="acc-body">
             <div className="swatches">
@@ -1058,6 +1438,149 @@ export default function App() {
               value={settings.ascii.contrast ?? 0.3}
               onChange={(v) => patchAscii({ contrast: v })}
             />
+          </div>
+        </details>
+
+        <details className="acc">
+          <summary>
+            share seed
+            <button
+              className={`copy-mini summary-end ${codeCopied ? 'on' : ''}`}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                copySeed()
+              }}
+              title={pageActive ? 'copy page seed' : 'copy seed'}
+              aria-label="copy shareable seed to clipboard"
+            >
+              {codeCopied ? (
+                <svg viewBox="0 0 24 24" width="13" height="13">
+                  <path d="M4.5 12.5l5 5 10-11" fill="none" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="13" height="13">
+                  <rect x="9" y="9" width="11" height="11" rx="2" fill="none" />
+                  <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" fill="none" />
+                </svg>
+              )}
+            </button>
+          </summary>
+          <div className="acc-body">
+            <p className="sub">
+              {pageActive
+                ? 'this seed recreates the whole stitched page — colors, grain, ascii, blend, every section.'
+                : 'a seed recreates this exact gradient — colors, grain, ascii, everything.'}
+            </p>
+            <div className="code-row">
+              <input
+                className="hex"
+                readOnly
+                value={pageActive ? pageSeedText(sections, blend, ' ') : encodeCode(settings, ratio)}
+                onFocus={(e) => e.currentTarget.select()}
+                aria-label="shareable grainient seed"
+              />
+              <button className="ghost" onClick={copySeed}>
+                {codeCopied ? 'copied ✓' : 'copy'}
+              </button>
+            </div>
+            <textarea
+              className="hex paste"
+              value={codeDraft}
+              onChange={(e) => onCodeDraft(e.target.value)}
+              spellCheck={false}
+              rows={2}
+              placeholder="paste a seed, page seed, or app url…"
+              aria-label="paste a grainient seed"
+            />
+            {pasteMsg && <p className="sub">{pasteMsg}</p>}
+          </div>
+        </details>
+
+        <details className="acc" open={sections.length > 0}>
+          <summary>
+            page builder
+            <span className="hint">
+              {sections.length > 0 ? `${sections.length} section${sections.length > 1 ? 's' : ''}` : ''}
+            </span>
+            <span
+              role="switch"
+              aria-checked={pageActive}
+              aria-label="show the stitched page on the canvas"
+              tabIndex={0}
+              className={`toggle in-summary ${pageActive ? 'on' : ''}`}
+              title={pageActive ? 'showing the stitched page — switch back to the single gradient' : 'show the stitched page'}
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                if (sections.length > 0) setPageModeSync(!pageActive)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (sections.length > 0) setPageModeSync(!pageActive)
+                }
+              }}
+            >
+              <span />
+            </span>
+          </summary>
+          <div className="acc-body">
+            <p className="sub">
+              stitch gradients into one scrollable page — seams cross-fade into each other. export it as a single
+              html file or share it as a page seed.
+            </p>
+            <button className="ghost wide" onClick={addSection}>
+              + add current gradient as section
+            </button>
+            {sections.length > 1 && (
+              <Slider label="blend" value={blend} onChange={persistBlend} />
+            )}
+            {sections.length > 0 && (
+              <>
+                <div className="page-list">
+                  {sections.map((sec, i) => (
+                    <div className="page-row" key={sec.id}>
+                      <img
+                        src={sec.thumb}
+                        alt={`section ${i + 1}`}
+                        onClick={() => loadSection(sec)}
+                        title="load into editor"
+                      />
+                      <span className="meta">
+                        {i + 1} · {ratioParam(sec.ratio)}
+                      </span>
+                      <button className="mini" onClick={() => moveSection(sec.id, -1)} disabled={i === 0} title="move up">
+                        ↑
+                      </button>
+                      <button
+                        className="mini"
+                        onClick={() => moveSection(sec.id, 1)}
+                        disabled={i === sections.length - 1}
+                        title="move down"
+                      >
+                        ↓
+                      </button>
+                      <button className="mini" onClick={() => removeSection(sec.id)} title="remove">
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="row">
+                  <button className="ghost" onClick={previewPage} title="open the stitched page in a new tab">
+                    preview
+                  </button>
+                  <button className="ghost" onClick={copyPageCode} title="copy a shareable page seed">
+                    {pageCopied ? 'copied ✓' : 'copy seed'}
+                  </button>
+                  <button className="ghost" onClick={downloadPageHTML} title="download the page as one html file">
+                    html
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </details>
 

@@ -86,6 +86,10 @@ body {
   cursor: grabbing;
 }
 
+.stage canvas.page {
+  cursor: default;
+}
+
 .reset-view {
   position: absolute;
   bottom: 22px;
@@ -128,11 +132,17 @@ body {
   padding: 26px 22px;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
   border-left: 1px solid var(--line);
   background: var(--panel);
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+/* never let panel children compress — content overflows into the panel scroll */
+.panel > * {
+  flex-shrink: 0;
 }
 
 .panel h1 {
@@ -573,6 +583,130 @@ input[type='range']::-moz-range-thumb {
 .swatch.sel {
   outline: 2px solid var(--text);
   outline-offset: 1px;
+}
+
+/* share code */
+.code-row {
+  display: flex;
+  gap: 6px;
+}
+
+.code-row .hex {
+  flex: 1;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.code-row .ghost {
+  flex: none;
+}
+
+textarea.hex.paste {
+  resize: vertical;
+  min-height: 38px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* copy icon inside accordion summaries */
+.copy-mini {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.copy-mini svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.copy-mini:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.copy-mini.on {
+  color: var(--text);
+}
+
+.copy-mini.summary-end {
+  margin-left: auto;
+}
+
+/* page builder */
+.page-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.page-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 4px 6px 4px 4px;
+}
+
+.page-row img {
+  width: 56px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 6px;
+  display: block;
+  cursor: pointer;
+}
+
+.page-row img:hover {
+  outline: 1px solid var(--line-strong);
+}
+
+.page-row .meta {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page-row .mini {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.page-row .mini:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.page-row .mini:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* library */
