@@ -4,8 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "prebuild": "node scripts/cloudflare-pages-build.mjs clean",
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "postbuild": "node scripts/cloudflare-pages-build.mjs verify",
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -14,7 +16,6 @@
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.37.1",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

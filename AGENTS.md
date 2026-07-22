@@ -10,7 +10,7 @@ the codebase. The guide for agents *driving the deployed app* lives at
 ```sh
 npm install
 npm run dev      # → http://localhost:5173
-npm run build    # tsc -b && vite build → dist/client (site) + dist/server (worker)
+npm run build    # clean + tsc/Vite + Cloudflare Pages artifact verification → dist/client
 npm run lint     # oxlint
 ```
 
@@ -27,7 +27,6 @@ npm run lint     # oxlint
 | `src/export-html.ts` | builds the self-contained HTML export (inlines the embed runtime via `virtual:grainient-embed`) |
 | `build/embed-vite-plugin.ts` | bundles the embed runtime (nested vite build) → virtual module + `/embed.js` |
 | `public/agents.md`, `public/llms.txt` | agent-facing site docs, served verbatim |
-| `worker/index.ts` | Cloudflare worker: static asset passthrough |
 
 ## Invariants — do not break these
 

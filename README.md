@@ -20,3 +20,15 @@ npm run dev     # → http://localhost:5173
 AI agents: drive it headlessly with URL params, shareable seeds, or `window.grainient` —
 see [public/agents.md](public/agents.md) (served at `/agents.md` on the deployed site, runtime at `/embed.js`).
 For working on this codebase, see [AGENTS.md](AGENTS.md).
+
+## Deploy
+
+The production site is a static Cloudflare Pages project connected to GitHub.
+
+- Build command: `npm run build`
+- Build output directory: `dist/client`
+- Production branch: `main`
+
+The build cleans old output and fails if it finds Workers or Pages Functions artifacts.
+Do not add a Wrangler config, a `functions/` directory, or `@cloudflare/vite-plugin`
+unless the deployment is intentionally migrated away from static Pages.
