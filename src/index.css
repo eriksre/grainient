@@ -16,10 +16,11 @@
   --menu-bg: #17171d;
   --active-bg: #ffffff;
   --active-fg: #0a0a0d;
-  --canvas-shadow: 0 32px 90px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --canvas-shadow:
+    0 32px 90px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-:root[data-theme='light'] {
+:root[data-theme="light"] {
   color-scheme: light;
   --bg: #ecebf0;
   --panel: #f9f8fb;
@@ -37,7 +38,8 @@
   --menu-bg: #ffffff;
   --active-bg: #17171c;
   --active-fg: #ffffff;
-  --canvas-shadow: 0 24px 60px rgba(25, 20, 50, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --canvas-shadow:
+    0 24px 60px rgba(25, 20, 50, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.06);
 }
 
 * {
@@ -55,7 +57,13 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font:
+    14px/1.5 "Geist",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -146,7 +154,7 @@ body {
 }
 
 .panel h1 {
-  font-family: 'Geist Pixel', 'Geist', ui-monospace, monospace;
+  font-family: "Geist Pixel", "Geist", ui-monospace, monospace;
   font-size: 22px;
   font-weight: 400;
   letter-spacing: 0.01em;
@@ -164,7 +172,9 @@ body {
   gap: 9px;
 }
 
-.panel label {
+.panel label,
+.panel .section-label {
+  margin: 0;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -202,7 +212,7 @@ button {
 }
 
 .lucky::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.18);
@@ -292,7 +302,7 @@ button {
   border: 1px solid var(--line-strong);
 }
 
-.swatch input[type='color'] {
+.swatch input[type="color"] {
   position: absolute;
   inset: -8px;
   width: 52px;
@@ -356,7 +366,7 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-input[type='range'] {
+input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 100%;
@@ -366,7 +376,7 @@ input[type='range'] {
   outline: none;
 }
 
-input[type='range']::-webkit-slider-thumb {
+input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 15px;
@@ -378,7 +388,7 @@ input[type='range']::-webkit-slider-thumb {
   cursor: pointer;
 }
 
-input[type='range']::-moz-range-thumb {
+input[type="range"]::-moz-range-thumb {
   width: 15px;
   height: 15px;
   border-radius: 50%;
@@ -412,7 +422,9 @@ input[type='range']::-moz-range-thumb {
   align-items: center;
   justify-content: center;
   color: var(--muted);
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .theme-btn:hover {
@@ -439,7 +451,9 @@ input[type='range']::-moz-range-thumb {
   align-items: center;
   justify-content: center;
   color: var(--muted);
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .bookmark svg {
@@ -531,7 +545,7 @@ input[type='range']::-moz-range-thumb {
 }
 
 .acc summary::before {
-  content: '';
+  content: "";
   width: 5px;
   height: 5px;
   border-right: 1.5px solid var(--muted);
@@ -572,7 +586,11 @@ input[type='range']::-moz-range-thumb {
   border: 1px solid var(--line);
   background: var(--surface-1);
   color: var(--text);
-  font: 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font:
+    13px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
   outline: none;
 }
 
@@ -618,7 +636,9 @@ textarea.hex.paste {
   align-items: center;
   justify-content: center;
   color: var(--muted);
-  transition: color 0.15s ease, background 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
 }
 
 .copy-mini svg {
@@ -659,6 +679,16 @@ textarea.hex.paste {
   border: 1px solid var(--line);
   border-radius: 9px;
   padding: 4px 6px 4px 4px;
+}
+
+.thumbnail-button {
+  display: block;
+  padding: 0;
+}
+
+.thumbnail-button:focus-visible {
+  outline: 2px solid var(--active-bg);
+  outline-offset: 2px;
 }
 
 .page-row img {
@@ -722,6 +752,11 @@ textarea.hex.paste {
   overflow: hidden;
   border: 1px solid var(--line);
   aspect-ratio: 4 / 3;
+}
+
+.lib-item .thumbnail-button {
+  width: 100%;
+  height: 100%;
 }
 
 .lib-item img {

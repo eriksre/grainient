@@ -1,5 +1,5 @@
-declare module 'virtual:grainient-embed' {
+declare module "virtual:grainient-embed" {
   /** the embed runtime bundled as a minified IIFE string */
-  const src: string
-  export default src
+  const src: string;
+  export default src;
 }

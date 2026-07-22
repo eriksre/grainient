@@ -4,55 +4,68 @@
 // cross-fade. Either way the canvas re-renders to fit its container, so
 // resizing a section (aspect-ratio, min-height, anything) "just works".
 
-import embedRuntime from 'virtual:grainient-embed'
-import { DEFAULT_BLEND, encodeCode, encodePageCode, ratioParam } from './code'
-import { pageHeightUnits, type PageSectionSpec } from './stitch'
+import embedRuntime from "virtual:grainient-embed";
 
-export type SectionSpec = PageSectionSpec
+import { DEFAULT_BLEND, encodeCode, encodePageCode, ratioParam } from "./code";
+import { pageHeightUnits } from "./stitch";
+import type { PageSectionSpec } from "./stitch";
+
+export type SectionSpec = PageSectionSpec;
 
 const escapeAttr = (s: string) =>
-  s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+  s.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 
 /** CSS aspect-ratio value: "16 / 9" for presets, a plain number otherwise */
 function aspectValue(ratio: number): string {
-  const name = ratioParam(ratio)
-  return name.includes(':') ? name.replace(':', ' / ') : name
+  const name = ratioParam(ratio);
+  return name.includes(":") ? name.replace(":", " / ") : name;
 }
 
 export interface EmbedHTMLOptions {
-  title?: string
+  title?: string;
   /** seam cross-fade for multi-section pages, 0..1 */
-  blend?: number
+  blend?: number;
 }
 
-export function buildEmbedHTML(sections: SectionSpec[], opts: EmbedHTMLOptions = {}): string {
-  const title = opts.title ?? 'grainient'
-  const blend = opts.blend ?? DEFAULT_BLEND
-  let block: string
+export function buildEmbedHTML(
+  sections: SectionSpec[],
+  opts: EmbedHTMLOptions = {}
+): string {
+  if (sections.length === 0) {
+    throw new Error("At least one section is required");
+  }
+
+  const [firstSection] = sections;
+  const title = opts.title ?? "grainient";
+  const blend = opts.blend ?? DEFAULT_BLEND;
+  let block: string;
   if (sections.length === 1) {
-    const sec = sections[0]
-    const code = encodeCode(sec.settings, sec.ratio)
+    const sec = firstSection;
+    const code = encodeCode(sec.settings, sec.ratio);
     block = `  <!-- edit this gradient by pasting its seed back into grainient: ${code} -->
   <section
     class="grainient"
-    style="aspect-ratio: ${aspectValue(sec.ratio)}; background: ${sec.settings.colors[0] ?? '#111'};"
+    style="aspect-ratio: ${aspectValue(sec.ratio)}; background: ${sec.settings.colors[0] ?? "#111"};"
     data-grainient="${escapeAttr(code)}"
   >
     <!-- your content goes here — it renders on top of the gradient -->
-  </section>`
+  </section>`;
   } else {
-    const pageCode = encodePageCode(sections, blend)
-    const combined = 1 / pageHeightUnits(sections)
+    const pageCode = encodePageCode(sections, blend);
+    const combined = 1 / pageHeightUnits(sections);
     block = `  <!-- ${sections.length} stitched sections with blended seams — paste this page seed back into grainient to edit:
-${pageCode.split('\n').map((l) => '       ' + l).join('\n')}
+${pageCode
+  .split("\n")
+  .map((l) => `       ${l}`)
+  .join("\n")}
   -->
   <section
     class="grainient"
-    style="aspect-ratio: ${Math.round(combined * 10000) / 10000}; background: ${sections[0].settings.colors[0] ?? '#111'};"
-    data-grainient-page="${escapeAttr(pageCode.replace(/\n/g, ' '))}"
+    style="aspect-ratio: ${Math.round(combined * 10_000) / 10_000}; background: ${firstSection.settings.colors[0] ?? "#111"};"
+    data-grainient-page="${escapeAttr(pageCode.replaceAll("\n", " "))}"
   >
     <!-- your content goes here — it renders on top of the stitched page -->
-  </section>`
+  </section>`;
   }
 
   return `<!doctype html>
@@ -90,25 +103,34 @@ ${block}
   <script>${embedRuntime}</script>
 </body>
 </html>
-`
+`;
 }
 
 function triggerDownload(html: string, filename: string) {
-  const blob = new Blob([html], { type: 'text/html' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-export function downloadEmbedHTML(sections: SectionSpec[], filename: string, opts?: EmbedHTMLOptions) {
-  triggerDownload(buildEmbedHTML(sections, opts), filename)
+export function downloadEmbedHTML(
+  sections: SectionSpec[],
+  filename: string,
+  opts?: EmbedHTMLOptions
+) {
+  triggerDownload(buildEmbedHTML(sections, opts), filename);
 }
 
 /** open the exported page in a new tab (live resizable preview) */
-export function previewEmbedHTML(sections: SectionSpec[], opts?: EmbedHTMLOptions) {
-  const blob = new Blob([buildEmbedHTML(sections, opts)], { type: 'text/html' })
-  window.open(URL.createObjectURL(blob), '_blank')
+export function previewEmbedHTML(
+  sections: SectionSpec[],
+  opts?: EmbedHTMLOptions
+) {
+  const blob = new Blob([buildEmbedHTML(sections, opts)], {
+    type: "text/html",
+  });
+  window.open(URL.createObjectURL(blob), "_blank");
 }
